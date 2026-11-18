@@ -1,6 +1,6 @@
 {
   "name": "frota-gobor",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "description": "Painel de Frota Gobor: IPVA, licenciamento, multas e motoristas (Google Sheets + Apps Script)",
   "type": "module",

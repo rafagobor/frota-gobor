@@ -1,5 +1,5 @@
 /**
- * PAINEL DE FROTA GOBOR - versao 0.2.0 - gerado em 2026-11-18
+ * PAINEL DE FROTA GOBOR - versao 0.3.0 - gerado em 2026-11-18
  *
  * COMO INSTALAR (sem terminal):
  *   1. Abra a planilha "Frota Gobor - Base" > Extensoes > Apps Script.
@@ -43,6 +43,7 @@ var Core = (() => {
     ids: () => ids_exports,
     importacao: () => importacao_exports,
     locacao: () => locacao_exports,
+    lote: () => lote_exports,
     moeda: () => moeda_exports,
     multas: () => multas_exports,
     obrigacoes: () => obrigacoes_exports,
@@ -473,14 +474,20 @@ var Core = (() => {
   // core/obrigacoes.js
   var obrigacoes_exports = {};
   __export(obrigacoes_exports, {
+    FILAS: () => FILAS,
     STATUS_OBRIGACAO: () => STATUS_OBRIGACAO,
+    classificar: () => classificar,
+    csvLancamentoErp: () => csvLancamentoErp,
+    historicoErp: () => historicoErp,
     normalizarMto: () => normalizarMto,
     obrigacaoQuitada: () => obrigacaoQuitada,
+    rotuloParcela: () => rotuloParcela,
     situacaoPrazo: () => situacaoPrazo,
     statusCalculado: () => statusCalculado,
     temPagamento: () => temPagamento,
     transicaoPermitida: () => transicaoPermitida,
-    validarObrigacao: () => validarObrigacao
+    validarObrigacao: () => validarObrigacao,
+    valorAtual: () => valorAtual
   });
   var STATUS_OBRIGACAO = [
     "PREVISTO",
@@ -537,6 +544,10 @@ var Core = (() => {
       if (!(Number(o.valor_pago) > 0)) erros.push("valor_pago \u00e9 obrigat\u00f3rio (e maior que zero) para marcar como pago");
       if (!ehIso(o.data_pagamento)) erros.push("data_pagamento \u00e9 obrigat\u00f3ria para marcar como pago");
     }
+    const temValor = Number(o.valor_pago) > 0, temData = ehIso(o.data_pagamento);
+    if (temValor !== temData && status !== "PAGO" && status !== "PAGO_SEM_LANCAMENTO") {
+      erros.push(temValor ? "Informe tamb\u00e9m a data_pagamento (valor e data do pagamento v\u00e3o juntos)" : "Informe tamb\u00e9m o valor_pago (valor e data do pagamento v\u00e3o juntos)");
+    }
     if (status === "PAGO" && !normalizarMto(o.nr_lancamento_erp)) erros.push("PAGO exige n\u00ba de lan\u00e7amento no ERP (MTO); sem ele, use PAGO_SEM_LANCAMENTO");
     if (status === "LANCADO_ERP" && !normalizarMto(o.nr_lancamento_erp)) erros.push("LANCADO_ERP exige n\u00ba de lan\u00e7amento no ERP (MTO)");
     if (status === "BLOQUEADO" && !String(o.bloqueio_motivo || "").trim()) erros.push("BLOQUEADO exige bloqueio_motivo");
@@ -556,6 +567,60 @@ var Core = (() => {
     if (d === 0) return "VENCE_HOJE";
     if (d <= diasAlerta) return "VENCE_EM_7_DIAS";
     return "EM_DIA";
+  }
+  function rotuloParcela(parcela) {
+    return String(parcela) === "U" ? "cota \u00fanica" : `${parcela}\u00aa parcela`;
+  }
+  function historicoErp(o) {
+    const trib = o.tributo === "LICENCIAMENTO" ? "Licenciamento" : o.tributo === "OUTRO" ? o.descricao_outro || "Outro" : "IPVA";
+    const meio = o.tributo === "IPVA" ? ` \u2013 ${rotuloParcela(o.parcela)}` : "";
+    return `${trib} ${o.exercicio}${meio} \u2013 ${o.placa || ""}`.trim();
+  }
+  var FILAS = {
+    A_LANCAR_ERP: "A lan\u00e7ar no ERP",
+    PAGO_SEM_LANCAMENTO: "Pagos sem lan\u00e7amento",
+    VENCIDOS: "Vencidos",
+    BLOQUEADOS: "Bloqueados",
+    SEM_ESTIMATIVA: "Sem estimativa"
+  };
+  function classificar(o, hoje, diasAlerta = 7) {
+    const quitada = obrigacaoQuitada(o);
+    const situacao = situacaoPrazo(o.vencimento, hoje, quitada || o.status === "BLOQUEADO", diasAlerta);
+    const filas = [];
+    const ativa = !["CANCELADO", "NAO_APLICA", "ISENTO"].includes(o.status);
+    if (ativa && Number(o.valor_guia) > 0 && !normalizarMto(o.nr_lancamento_erp) && !temPagamento(o)) filas.push("A_LANCAR_ERP");
+    if (o.status === "PAGO_SEM_LANCAMENTO") filas.push("PAGO_SEM_LANCAMENTO");
+    if (situacao === "VENCIDO") filas.push("VENCIDOS");
+    if (o.status === "BLOQUEADO") filas.push("BLOQUEADOS");
+    if (ativa && !quitada && (o.valor_estimado === null || o.valor_estimado === void 0 || o.valor_estimado === "") && !(Number(o.valor_guia) > 0)) filas.push("SEM_ESTIMATIVA");
+    return { situacao_prazo: situacao, filas };
+  }
+  function valorAtual(o) {
+    if (Number(o.valor_pago) > 0) return { camada: "PAGO", valor: Number(o.valor_pago) };
+    if (Number(o.valor_guia) > 0) return { camada: "DEVIDO", valor: Number(o.valor_guia) };
+    if (o.valor_estimado !== null && o.valor_estimado !== void 0 && o.valor_estimado !== "") return { camada: "ESTIMADO", valor: Number(o.valor_estimado) };
+    return { camada: null, valor: null };
+  }
+  function csvLancamentoErp(obrigacoes) {
+    const cab = ["CNPJ", "Placa", "Tributo", "Parcela", "Vencimento", "Valor", "Linha digit\u00e1vel", "Hist\u00f3rico", "Obriga\u00e7\u00e3o"];
+    const br = (iso) => iso ? iso.split("-").reverse().join("/") : "";
+    const num = (v) => v === null || v === void 0 || v === "" ? "" : Number(v).toFixed(2).replace(".", ",");
+    const esc = (v) => {
+      const s = String(v === null || v === void 0 ? "" : v);
+      return /[;"\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+    };
+    const linhas = obrigacoes.map((o) => [
+      o.cnpj,
+      o.placa,
+      o.tributo,
+      rotuloParcela(o.parcela),
+      br(o.vencimento),
+      num(o.valor_guia),
+      o.linha_digitavel,
+      historicoErp(o),
+      o.obrigacao_id
+    ].map(esc).join(";"));
+    return [cab.join(";"), ...linhas].join("\n") + "\n";
   }
 
   // core/locacao.js
@@ -1569,6 +1634,8 @@ var Core = (() => {
     categoriaDoTipo: () => categoriaDoTipo,
     completarVeiculo: () => completarVeiculo,
     normalizarTipoVeiculo: () => normalizarTipoVeiculo,
+    obrigacoesAposVenda: () => obrigacoesAposVenda,
+    situacaoDocumental: () => situacaoDocumental,
     validarVeiculo: () => validarVeiculo,
     veiculoAtivo: () => veiculoAtivo
   });
@@ -1638,6 +1705,30 @@ var Core = (() => {
   }
   function completarVeiculo(v) {
     return { ...v, placa_norm: normalizarPlaca(v.placa), categoria: categoriaDoTipo(v.tipo) };
+  }
+  function situacaoDocumental(obrigacoesDoVeiculo, exercicio, hoje) {
+    const doAno = obrigacoesDoVeiculo.filter((o) => Number(o.exercicio) === Number(exercicio) && !["CANCELADO"].includes(o.status));
+    const quitada = (o) => ["PAGO", "PAGO_SEM_LANCAMENTO", "ISENTO", "NAO_APLICA"].includes(o.status);
+    const vencida = (o) => !quitada(o) && o.vencimento && o.vencimento < hoje;
+    const ipva = doAno.filter((o) => o.tributo === "IPVA");
+    const lic = doAno.filter((o) => o.tributo === "LICENCIAMENTO");
+    let sIpva = "NAO_GERADO";
+    if (ipva.length) {
+      if (ipva.every((o) => o.status === "ISENTO")) sIpva = "ISENTO";
+      else if (ipva.every(quitada)) sIpva = "QUITADO";
+      else if (ipva.some(vencida)) sIpva = "VENCIDO";
+      else sIpva = "EM_DIA";
+    }
+    let sLic = "NAO_GERADO";
+    if (lic.length) {
+      const l = lic[0];
+      if (quitada(l)) sLic = l.crlv_emitido === "S" || l.status === "NAO_APLICA" ? "LICENCIADO" : "QUITADO_SEM_CRLV";
+      else sLic = vencida(l) ? "VENCIDO" : "EM_DIA";
+    }
+    return { ipva: sIpva, licenciamento: sLic };
+  }
+  function obrigacoesAposVenda(obrigacoesDoVeiculo, data) {
+    return obrigacoesDoVeiculo.filter((o) => o.vencimento && o.vencimento > data && !["PAGO", "PAGO_SEM_LANCAMENTO", "LANCADO_ERP", "CANCELADO", "NAO_APLICA", "ISENTO"].includes(o.status) && !(Number(o.valor_pago) > 0));
   }
 
   // core/config-padrao.js
@@ -2073,15 +2164,173 @@ var Core = (() => {
     return l;
   }
 
+  // core/lote.js
+  var lote_exports = {};
+  __export(lote_exports, {
+    TIPOS_LOTE: () => TIPOS_LOTE,
+    lerLinhas: () => lerLinhas,
+    normalizarParcela: () => normalizarParcela,
+    normalizarTributo: () => normalizarTributo,
+    previaLote: () => previaLote
+  });
+  var TIPOS_LOTE = {
+    GUIA: ["placa", "tributo", "parcela", "valor", "vencimento", "linha_digitavel"],
+    MTO: ["placa", "tributo", "parcela", "mto"],
+    PAGAMENTO: ["placa", "tributo", "parcela", "valor", "data", "mto"]
+  };
+  var SINONIMOS_COLUNA = {
+    placa: ["placa", "veiculo", "ve\u00edculo"],
+    tributo: ["tributo", "tipo", "imposto"],
+    parcela: ["parcela", "cota", "parc"],
+    valor: ["valor", "valor_guia", "valor_pago", "total", "r$"],
+    vencimento: ["vencimento", "venc", "data_vencimento"],
+    linha_digitavel: ["linha_digitavel", "linha digit\u00e1vel", "linha digitavel", "codigo de barras", "c\u00f3digo de barras"],
+    mto: ["mto", "nr_lancamento_erp", "lancamento", "lan\u00e7amento", "n\u00ba mto"],
+    data: ["data", "data_pagamento", "pagamento", "data pgto"]
+  };
+  function semAcento(s) {
+    return String(s || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
+  }
+  function normalizarTributo(v) {
+    const s = semAcento(v).replace(/[^a-z]/g, "");
+    if (!s) return null;
+    if (s.startsWith("ipva")) return "IPVA";
+    if (s.startsWith("lic") || s === "crlv" || s === "trlav") return "LICENCIAMENTO";
+    return null;
+  }
+  function normalizarParcela(v) {
+    const s = semAcento(v).replace(/\s+/g, "");
+    if (!s) return null;
+    if (["u", "unica", "cotaunica", "cu", "avista", "integral"].includes(s)) return "U";
+    const m = s.match(/^([1-5])(a|\u00aa|o|\u00ba|parcela)?$/);
+    return m ? m[1] : null;
+  }
+  function separar(linha, sep) {
+    if (sep === "	") return linha.split("	").map((c2) => c2.trim());
+    const out = [];
+    let campo = "", aspas = false;
+    for (let i = 0; i < linha.length; i++) {
+      const ch = linha[i];
+      if (aspas) {
+        if (ch === '"' && linha[i + 1] === '"') {
+          campo += '"';
+          i++;
+        } else if (ch === '"') aspas = false;
+        else campo += ch;
+      } else if (ch === '"') aspas = true;
+      else if (ch === sep) {
+        out.push(campo.trim());
+        campo = "";
+      } else campo += ch;
+    }
+    out.push(campo.trim());
+    return out;
+  }
+  function lerLinhas(texto, tipo) {
+    const colunas = TIPOS_LOTE[tipo];
+    if (!colunas) throw new Error(`Tipo de lote desconhecido: ${tipo}`);
+    const linhas = String(texto || "").replace(/\r/g, "").split("\n").map((l, i) => ({ n: i + 1, t: l })).filter((l) => l.t.trim());
+    if (!linhas.length) return [];
+    const amostra = linhas[0].t;
+    const sep = amostra.includes("	") ? "	" : amostra.includes(";") ? ";" : ",";
+    let mapa = colunas.map((_, i) => i);
+    const primeira = separar(linhas[0].t, sep).map(semAcento);
+    const ehCabecalho = primeira.some((c2) => SINONIMOS_COLUNA.placa.includes(c2));
+    if (ehCabecalho) {
+      mapa = colunas.map((col) => primeira.findIndex((c2) => (SINONIMOS_COLUNA[col] || [col]).includes(c2)));
+      linhas.shift();
+    }
+    return linhas.map((l) => {
+      const cel = separar(l.t, sep);
+      const reg = { linha: l.n };
+      colunas.forEach((col, i) => {
+        reg[col] = mapa[i] >= 0 ? cel[mapa[i]] || "" : "";
+      });
+      return reg;
+    });
+  }
+  function previaLote({ tipo, texto, exercicio, obrigacoes, veiculos, hoje }) {
+    const porPlaca = /* @__PURE__ */ new Map();
+    for (const v of veiculos) {
+      const n = normalizarPlaca(v.placa);
+      if (n) porPlaca.set(n, v);
+    }
+    const doAno = obrigacoes.filter((o) => Number(o.exercicio) === Number(exercicio));
+    const vistos = /* @__PURE__ */ new Set();
+    const itens = lerLinhas(texto, tipo).map((r) => {
+      const item = { linha: r.linha, placa: r.placa, tributo: r.tributo, parcela: r.parcela, erro: null, aviso: null, obrigacao_id: null, patch: null };
+      const v = porPlaca.get(normalizarPlaca(r.placa));
+      if (!v) return { ...item, erro: `Placa ${r.placa || "(vazia)"} n\u00e3o cadastrada` };
+      const tributo = normalizarTributo(r.tributo);
+      if (!tributo) return { ...item, erro: `Tributo "${r.tributo}" n\u00e3o reconhecido (use IPVA ou LICENCIAMENTO)` };
+      let parcela = normalizarParcela(r.parcela);
+      const candidatas = doAno.filter((o2) => o2.veiculo_id === v.veiculo_id && o2.tributo === tributo && !["CANCELADO"].includes(o2.status));
+      if (!parcela && candidatas.length === 1) parcela = String(candidatas[0].parcela);
+      const o = candidatas.find((x) => String(x.parcela) === parcela);
+      if (!o) {
+        const existentes = candidatas.map((x) => x.parcela).join(", ") || "nenhuma";
+        return { ...item, erro: `Obriga\u00e7\u00e3o ${tributo} parcela ${r.parcela || "?"} de ${v.placa} em ${exercicio} n\u00e3o encontrada (existentes: ${existentes})` };
+      }
+      if (vistos.has(o.obrigacao_id)) return { ...item, obrigacao_id: o.obrigacao_id, erro: "Linha repetida no lote" };
+      vistos.add(o.obrigacao_id);
+      const patch = {};
+      if (tipo === "GUIA") {
+        const valor = parseMoeda(r.valor);
+        if (!(valor > 0)) return { ...item, obrigacao_id: o.obrigacao_id, erro: `Valor da guia inv\u00e1lido: "${r.valor}"` };
+        if (obrigacaoQuitada(o)) return { ...item, obrigacao_id: o.obrigacao_id, erro: `Obriga\u00e7\u00e3o j\u00e1 est\u00e1 ${o.status}` };
+        patch.valor_guia = valor;
+        if (r.vencimento) {
+          const venc = parseDataFlex(r.vencimento);
+          if (!venc) return { ...item, obrigacao_id: o.obrigacao_id, erro: `Vencimento inv\u00e1lido: "${r.vencimento}"` };
+          patch.vencimento = venc;
+        }
+        if (r.linha_digitavel) patch.linha_digitavel = r.linha_digitavel.replace(/\s+/g, " ").trim();
+      } else if (tipo === "MTO") {
+        const mto = normalizarMto(r.mto);
+        if (!mto) return { ...item, obrigacao_id: o.obrigacao_id, erro: `N\u00ba MTO inv\u00e1lido: "${r.mto}"` };
+        patch.nr_lancamento_erp = mto;
+        patch.data_lancamento_erp = hoje;
+      } else {
+        const valor = parseMoeda(r.valor);
+        const data = parseDataFlex(r.data);
+        if (!(valor > 0)) return { ...item, obrigacao_id: o.obrigacao_id, erro: `Valor pago inv\u00e1lido: "${r.valor}"` };
+        if (!data) return { ...item, obrigacao_id: o.obrigacao_id, erro: `Data de pagamento inv\u00e1lida: "${r.data}"` };
+        if (data > hoje) return { ...item, obrigacao_id: o.obrigacao_id, erro: `Data de pagamento no futuro: ${data}` };
+        patch.valor_pago = valor;
+        patch.data_pagamento = data;
+        if (r.mto) {
+          const mto = normalizarMto(r.mto);
+          if (!mto) return { ...item, obrigacao_id: o.obrigacao_id, erro: `N\u00ba MTO inv\u00e1lido: "${r.mto}"` };
+          patch.nr_lancamento_erp = mto;
+          if (!o.data_lancamento_erp) patch.data_lancamento_erp = hoje;
+        }
+        const ref = Number(o.valor_guia) > 0 ? Number(o.valor_guia) : null;
+        if (ref && valor > ref) patch.encargos = Math.round((valor - ref) * 100) / 100;
+      }
+      const depois = { ...o, ...patch };
+      depois.status = statusCalculado(depois);
+      patch.status = depois.status;
+      const erros = validarObrigacao(depois);
+      if (erros.length) return { ...item, obrigacao_id: o.obrigacao_id, erro: erros.join("; ") };
+      let aviso = null;
+      if (tipo === "PAGAMENTO" && !depois.nr_lancamento_erp) aviso = 'Pago sem n\u00ba MTO: vai para a fila "Pagos sem lan\u00e7amento"';
+      if (tipo === "MTO" && o.nr_lancamento_erp && normalizarMto(o.nr_lancamento_erp) !== patch.nr_lancamento_erp) aviso = `Substitui o MTO anterior (${o.nr_lancamento_erp})`;
+      if (tipo === "GUIA" && o.valor_estimado && Math.abs(patch.valor_guia - o.valor_estimado) / o.valor_estimado > 0.2) aviso = `Guia ${Math.round((patch.valor_guia / o.valor_estimado - 1) * 100)}% diferente do estimado`;
+      return { ...item, placa: v.placa, tributo, parcela: String(o.parcela), obrigacao_id: o.obrigacao_id, patch, aviso };
+    });
+    const comErro = itens.filter((i) => i.erro).length;
+    return { itens, validos: itens.length - comErro, comErro };
+  }
+
   // core/index.js
-  var VERSAO = "0.2.0";
+  var VERSAO = "0.3.0";
   return __toCommonJS(index_exports);
 })();
 
 
 // ===== 01_painel.js =====
 // GERADO por `npm run build` a partir de apps-script/ui/. N\u00c3O EDITAR ESTE ARQUIVO.
-var PAINEL_HTML = "<!DOCTYPE html>\n<html lang=\"pt-BR\">\n<head>\n  <base target=\"_top\">\n  <meta charset=\"utf-8\">\n  <title>Frota Gobor</title>\n  <style>\n  :root {\n    --fundo: #f5f6f8; --superficie: #ffffff; --texto: #1d2430; --mudo: #5d6878; --borda: #dde2e8;\n    --primaria: #1f3a5f; --primaria-texto: #ffffff; --destaque: #e8eef6;\n    --ok: #1e7a46; --alerta: #a35d00; --erro: #b42318;\n    --raio: 10px; --sombra: 0 1px 2px rgba(16, 24, 40, .06);\n    color-scheme: light dark;\n  }\n  @media (prefers-color-scheme: dark) {\n    :root:not([data-theme=\"light\"]) {\n      --fundo: #12161c; --superficie: #1b2129; --texto: #e7ebf0; --mudo: #9aa5b4; --borda: #2c3542;\n      --primaria: #8fb3e3; --primaria-texto: #0d1420; --destaque: #233042;\n      --ok: #5cc98a; --alerta: #f0b35a; --erro: #ff8a80;\n    }\n  }\n  :root[data-theme=\"dark\"] {\n    --fundo: #12161c; --superficie: #1b2129; --texto: #e7ebf0; --mudo: #9aa5b4; --borda: #2c3542;\n    --primaria: #8fb3e3; --primaria-texto: #0d1420; --destaque: #233042;\n    --ok: #5cc98a; --alerta: #f0b35a; --erro: #ff8a80;\n  }\n  * { box-sizing: border-box; }\n  html, body { margin: 0; padding: 0; }\n  body { background: var(--fundo); color: var(--texto); font: 15px/1.45 -apple-system, \"Segoe UI\", Roboto, Arial, sans-serif; min-height: 100vh; display: flex; flex-direction: column; }\n  .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }\n  .topo { display: flex; align-items: center; gap: 12px; padding: 10px 16px; background: var(--superficie); border-bottom: 1px solid var(--borda); position: sticky; top: 0; z-index: 5; }\n  .marca { white-space: nowrap; }\n  .busca { flex: 1; min-width: 0; }\n  .busca input { width: 100%; padding: 8px 12px; border: 1px solid var(--borda); border-radius: 8px; background: var(--fundo); color: var(--texto); font: inherit; }\n  .usuario { font-size: 13px; color: var(--mudo); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 40vw; }\n  .menu-botao { display: none; border: 1px solid var(--borda); background: var(--superficie); color: var(--texto); border-radius: 8px; padding: 4px 10px; font-size: 18px; }\n  .corpo { flex: 1; display: flex; min-height: 0; }\n  .lateral { width: 240px; flex-shrink: 0; padding: 12px 8px; border-right: 1px solid var(--borda); background: var(--superficie); }\n  .lateral a { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 8px 10px; border-radius: 8px; color: var(--texto); text-decoration: none; font-size: 14px; }\n  .lateral a:hover { background: var(--destaque); }\n  .lateral a[aria-current=\"page\"] { background: var(--primaria); color: var(--primaria-texto); }\n  .lateral .fase { font-size: 11px; opacity: .7; }\n  .conteudo { flex: 1; min-width: 0; padding: 20px 24px; outline: none; }\n  h1 { font-size: 22px; margin: 0 0 4px; }\n  .subtitulo { color: var(--mudo); margin: 0 0 20px; }\n  .grade { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; margin-bottom: 20px; }\n  .cartao { background: var(--superficie); border: 1px solid var(--borda); border-radius: var(--raio); padding: 14px 16px; box-shadow: var(--sombra); }\n  .cartao .rotulo { color: var(--mudo); font-size: 13px; }\n  .cartao .valor { font-size: 24px; font-weight: 600; margin-top: 2px; }\n  .tabela-envoltorio { overflow-x: auto; background: var(--superficie); border: 1px solid var(--borda); border-radius: var(--raio); }\n  table { border-collapse: collapse; width: 100%; font-size: 14px; }\n  th, td { text-align: left; padding: 8px 12px; border-bottom: 1px solid var(--borda); }\n  th { color: var(--mudo); font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: .03em; }\n  td.num { text-align: right; font-variant-numeric: tabular-nums; }\n  tr:last-child td { border-bottom: 0; }\n  .selo { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: 999px; font-size: 12px; border: 1px solid currentColor; }\n  .selo.ok { color: var(--ok); } .selo.alerta { color: var(--alerta); } .selo.erro { color: var(--erro); }\n  .mudo { color: var(--mudo); }\n  .aviso { border-left: 4px solid var(--alerta); background: var(--superficie); padding: 12px 14px; border-radius: 6px; margin-bottom: 16px; }\n  .erro-caixa { border-left: 4px solid var(--erro); background: var(--superficie); padding: 12px 14px; border-radius: 6px; }\n  .rodape { color: var(--mudo); font-size: 12px; padding: 8px 16px; border-top: 1px solid var(--borda); background: var(--superficie); }\n  @media (max-width: 800px) {\n    .menu-botao { display: inline-block; }\n    .usuario { display: none; }\n    .lateral { position: fixed; top: 53px; left: 0; bottom: 0; z-index: 4; transform: translateX(-100%); transition: transform .2s; box-shadow: var(--sombra); overflow-y: auto; }\n    .lateral.aberta { transform: none; }\n    .conteudo { padding: 16px; }\n  }\n</style>\n\n</head>\n<body>\n  <header class=\"topo\">\n    <button class=\"menu-botao\" id=\"menuBotao\" aria-label=\"Abrir menu\" aria-expanded=\"false\">\u2630</button>\n    <div class=\"marca\">\ud83d\ude9b <strong>Frota Gobor</strong></div>\n    <label class=\"busca\">\n      <span class=\"sr\">Busca global</span>\n      <input id=\"busca\" type=\"search\" placeholder=\"Placa, AIT, MTO ou motorista (em breve)\" disabled>\n    </label>\n    <div class=\"usuario\" id=\"usuario\">carregando\u2026</div>\n  </header>\n  <div class=\"corpo\">\n    <nav class=\"lateral\" id=\"lateral\" aria-label=\"Telas\"></nav>\n    <main id=\"conteudo\" class=\"conteudo\" tabindex=\"-1\">\n      <p class=\"mudo\">Carregando\u2026</p>\n    </main>\n  </div>\n  <footer class=\"rodape\">Vers\u00e3o <?= versao ?> \u00b7 dados no fuso America/Sao_Paulo</footer>\n  <script>\n  (function () {\n    'use strict';\n\n    // Telas do painel (prompt \u00a77). `perfis` vazio = todos os perfis cadastrados.\n    var TELAS = [\n      { id: 'visao-geral', titulo: '\ud83c\udfe0 Vis\u00e3o Geral', fase: '4', perfis: [] },\n      { id: 'agenda', titulo: '\ud83d\udcc5 Agenda', fase: '4', perfis: [] },\n      { id: 'ipva-licenciamento', titulo: '\ud83e\uddfe IPVA & Licenciamento', fase: '3', perfis: [] },\n      { id: 'multas', titulo: '\ud83d\udea8 Multas', fase: '5', perfis: [] },\n      { id: 'motoristas', titulo: '\ud83d\udc77 Motoristas', fase: '6', perfis: ['ADMIN', 'FINANCEIRO', 'DP'] },\n      { id: 'folha', titulo: '\ud83d\udcbc Folha do m\u00eas', fase: '6', perfis: ['ADMIN', 'FINANCEIRO', 'DP'] },\n      { id: 'veiculos', titulo: '\ud83d\ude9b Ve\u00edculos', fase: '3', perfis: [] },\n      { id: 'locatarios', titulo: '\ud83e\udd1d Locat\u00e1rios & Repasses', fase: '8', perfis: [] },\n      { id: 'custos', titulo: '\ud83d\udcca Custos & Gerencial', fase: '4', perfis: [] },\n      { id: 'revisao', titulo: '\ud83d\udce5 Fila de Revis\u00e3o', fase: '5', perfis: ['ADMIN', 'FINANCEIRO'] },\n      { id: 'admin', titulo: '\u2699\ufe0f Admin', fase: '1', perfis: ['ADMIN'] }\n    ];\n\n    var estado = { perfil: null, eu: null };\n\n    function el(tag, atributos, filhos) {\n      var e = document.createElement(tag);\n      Object.keys(atributos || {}).forEach(function (k) {\n        if (k === 'texto') e.textContent = atributos[k];\n        else if (k === 'classe') e.className = atributos[k];\n        else e.setAttribute(k, atributos[k]);\n      });\n      (filhos || []).forEach(function (f) { if (f) e.appendChild(typeof f === 'string' ? document.createTextNode(f) : f); });\n      return e;\n    }\n\n    function chamar(rota, args) {\n      return new Promise(function (resolve, reject) {\n        google.script.run\n          .withSuccessHandler(function (r) { (r && r.ok) ? resolve(r.dados) : reject(new Error(r ? r.erro : 'Sem resposta do servidor')); })\n          .withFailureHandler(function (e) { reject(e instanceof Error ? e : new Error(String(e))); })\n          .api(rota, args || {});\n      });\n    }\n\n    function numeroBR(n) {\n      return n === null || n === undefined ? '\u2014' : Number(n).toLocaleString('pt-BR');\n    }\n\n    function dataBR(iso) {\n      return iso ? iso.split('-').reverse().join('/') : '';\n    }\n\n    function telasPermitidas() {\n      return TELAS.filter(function (t) { return !t.perfis.length || t.perfis.indexOf(estado.perfil) >= 0; });\n    }\n\n    function montarMenu(atual) {\n      var nav = document.getElementById('lateral');\n      nav.innerHTML = '';\n      telasPermitidas().forEach(function (t) {\n        var a = el('a', { href: '#/' + t.id }, [el('span', { texto: t.titulo }), el('span', { classe: 'fase', texto: 'F' + t.fase })]);\n        if (t.id === atual) a.setAttribute('aria-current', 'page');\n        nav.appendChild(a);\n      });\n    }\n\n    function conteudo() {\n      var c = document.getElementById('conteudo');\n      c.innerHTML = '';\n      return c;\n    }\n\n    function mostrarErro(mensagem) {\n      var c = conteudo();\n      c.appendChild(el('div', { classe: 'erro-caixa' }, [el('strong', { texto: 'N\u00e3o foi poss\u00edvel carregar. ' }), document.createTextNode(mensagem)]));\n    }\n\n    function telaEmConstrucao(t) {\n      var c = conteudo();\n      c.appendChild(el('h1', { texto: t.titulo }));\n      c.appendChild(el('p', { classe: 'subtitulo', texto: 'Esta tela chega na Fase ' + t.fase + ' do projeto.' }));\n    }\n\n    function telaAdmin() {\n      var c = conteudo();\n      c.appendChild(el('h1', { texto: '\u2699\ufe0f Admin' }));\n      c.appendChild(el('p', { classe: 'subtitulo', texto: 'Estado das tabelas da base. Cadastros, importadores e o assistente de exerc\u00edcio chegam nas pr\u00f3ximas fases.' }));\n      var caixa = el('div', { classe: 'tabela-envoltorio' }, [el('p', { classe: 'mudo', texto: ' Carregando\u2026' })]);\n      c.appendChild(caixa);\n      chamar('statusBase').then(function (d) {\n        var tbody = el('tbody');\n        d.tabelas.forEach(function (t) {\n          var selo = t.erro ? el('span', { classe: 'selo erro', texto: '\u2716 ' + t.erro }) : el('span', { classe: 'selo ok', texto: '\u2714 ok' });\n          tbody.appendChild(el('tr', {}, [\n            el('td', {}, [el('strong', { texto: t.nome }), el('div', { classe: 'mudo', texto: t.descricao })]),\n            el('td', { texto: t.planilha === 'MOTORISTAS' ? '\ud83d\udd12 Restrita' : 'Base' }),\n            el('td', { classe: 'num', texto: numeroBR(t.registros) }),\n            el('td', {}, [selo])\n          ]));\n        });\n        var tabela = el('table', {}, [\n          el('thead', {}, [el('tr', {}, [el('th', { texto: 'Tabela' }), el('th', { texto: 'Planilha' }), el('th', { texto: 'Registros' }), el('th', { texto: 'Situa\u00e7\u00e3o' })])]),\n          tbody\n        ]);\n        caixa.innerHTML = '';\n        caixa.appendChild(tabela);\n      }).catch(function (e) { mostrarErro(e.message); });\n    }\n\n    function telaVisaoGeral() {\n      var c = conteudo();\n      c.appendChild(el('h1', { texto: '\ud83c\udfe0 Vis\u00e3o Geral' }));\n      c.appendChild(el('p', { classe: 'subtitulo', texto: 'Hoje \u00e9 ' + dataBR(estado.eu.hoje) + '. Os indicadores chegam na Fase 4.' }));\n      c.appendChild(el('div', { classe: 'aviso', texto: 'Fase 1 (funda\u00e7\u00e3o): a base est\u00e1 criada e o acesso por perfil funciona. A carga dos 212 ve\u00edculos vem na Fase 2.' }));\n      var grade = el('div', { classe: 'grade' });\n      c.appendChild(grade);\n      chamar('statusBase').then(function (d) {\n        var mapa = {};\n        d.tabelas.forEach(function (t) { mapa[t.nome] = t.registros; });\n        [['Ve\u00edculos', 'VEICULOS'], ['Obriga\u00e7\u00f5es', 'OBRIGACOES'], ['Multas', 'MULTAS'], ['Filiais', 'FILIAIS']].forEach(function (p) {\n          grade.appendChild(el('div', { classe: 'cartao' }, [el('div', { classe: 'rotulo', texto: p[0] }), el('div', { classe: 'valor', texto: numeroBR(mapa[p[1]]) })]));\n        });\n      }).catch(function (e) { mostrarErro(e.message); });\n    }\n\n    function rotear() {\n      var id = (location.hash || '#/visao-geral').replace('#/', '');\n      var t = telasPermitidas().filter(function (x) { return x.id === id; })[0] || telasPermitidas()[0];\n      montarMenu(t.id);\n      document.getElementById('lateral').classList.remove('aberta');\n      if (t.id === 'visao-geral') telaVisaoGeral();\n      else if (t.id === 'admin') telaAdmin();\n      else telaEmConstrucao(t);\n      document.getElementById('conteudo').focus();\n    }\n\n    document.getElementById('menuBotao').addEventListener('click', function () {\n      var nav = document.getElementById('lateral');\n      var aberta = nav.classList.toggle('aberta');\n      this.setAttribute('aria-expanded', aberta ? 'true' : 'false');\n    });\n\n    chamar('meuPerfil').then(function (eu) {\n      estado.eu = eu;\n      estado.perfil = eu.perfil;\n      document.getElementById('usuario').textContent = eu.email + ' \u00b7 ' + eu.perfil;\n      window.addEventListener('hashchange', rotear);\n      rotear();\n    }).catch(function (e) {\n      document.getElementById('usuario').textContent = '';\n      mostrarErro(e.message);\n    });\n  })();\n</script>\n\n</body>\n</html>\n";
+var PAINEL_HTML = "<!DOCTYPE html>\n<html lang=\"pt-BR\">\n<head>\n  <base target=\"_top\">\n  <meta charset=\"utf-8\">\n  <title>Frota Gobor</title>\n  <style>\n  :root {\n    --fundo: #f5f6f8; --superficie: #ffffff; --texto: #1d2430; --mudo: #5d6878; --borda: #dde2e8;\n    --primaria: #1f3a5f; --primaria-texto: #ffffff; --destaque: #e8eef6;\n    --ok: #1e7a46; --alerta: #a35d00; --erro: #b42318;\n    --raio: 10px; --sombra: 0 1px 2px rgba(16, 24, 40, .06);\n    color-scheme: light dark;\n  }\n  @media (prefers-color-scheme: dark) {\n    :root:not([data-theme=\"light\"]) {\n      --fundo: #12161c; --superficie: #1b2129; --texto: #e7ebf0; --mudo: #9aa5b4; --borda: #2c3542;\n      --primaria: #8fb3e3; --primaria-texto: #0d1420; --destaque: #233042;\n      --ok: #5cc98a; --alerta: #f0b35a; --erro: #ff8a80;\n    }\n  }\n  :root[data-theme=\"dark\"] {\n    --fundo: #12161c; --superficie: #1b2129; --texto: #e7ebf0; --mudo: #9aa5b4; --borda: #2c3542;\n    --primaria: #8fb3e3; --primaria-texto: #0d1420; --destaque: #233042;\n    --ok: #5cc98a; --alerta: #f0b35a; --erro: #ff8a80;\n  }\n  * { box-sizing: border-box; }\n  html, body { margin: 0; padding: 0; }\n  body { background: var(--fundo); color: var(--texto); font: 15px/1.45 -apple-system, \"Segoe UI\", Roboto, Arial, sans-serif; min-height: 100vh; display: flex; flex-direction: column; }\n  .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }\n  .topo { display: flex; align-items: center; gap: 12px; padding: 10px 16px; background: var(--superficie); border-bottom: 1px solid var(--borda); position: sticky; top: 0; z-index: 5; }\n  .marca { white-space: nowrap; }\n  .busca { flex: 1; min-width: 0; }\n  .busca input { width: 100%; padding: 8px 12px; border: 1px solid var(--borda); border-radius: 8px; background: var(--fundo); color: var(--texto); font: inherit; }\n  .usuario { font-size: 13px; color: var(--mudo); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 40vw; }\n  .menu-botao { display: none; border: 1px solid var(--borda); background: var(--superficie); color: var(--texto); border-radius: 8px; padding: 4px 10px; font-size: 18px; }\n  .corpo { flex: 1; display: flex; min-height: 0; }\n  .lateral { width: 240px; flex-shrink: 0; padding: 12px 8px; border-right: 1px solid var(--borda); background: var(--superficie); }\n  .lateral a { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 8px 10px; border-radius: 8px; color: var(--texto); text-decoration: none; font-size: 14px; }\n  .lateral a:hover { background: var(--destaque); }\n  .lateral a[aria-current=\"page\"] { background: var(--primaria); color: var(--primaria-texto); }\n  .lateral .fase { font-size: 11px; opacity: .7; }\n  .conteudo { flex: 1; min-width: 0; padding: 20px 24px; outline: none; }\n  h1 { font-size: 22px; margin: 0 0 4px; }\n  .subtitulo { color: var(--mudo); margin: 0 0 20px; }\n  .grade { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; margin-bottom: 20px; }\n  .cartao { background: var(--superficie); border: 1px solid var(--borda); border-radius: var(--raio); padding: 14px 16px; box-shadow: var(--sombra); }\n  .cartao .rotulo { color: var(--mudo); font-size: 13px; }\n  .cartao .valor { font-size: 24px; font-weight: 600; margin-top: 2px; }\n  .tabela-envoltorio { overflow-x: auto; background: var(--superficie); border: 1px solid var(--borda); border-radius: var(--raio); }\n  table { border-collapse: collapse; width: 100%; font-size: 14px; }\n  th, td { text-align: left; padding: 8px 12px; border-bottom: 1px solid var(--borda); }\n  th { color: var(--mudo); font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: .03em; }\n  td.num { text-align: right; font-variant-numeric: tabular-nums; }\n  tr:last-child td { border-bottom: 0; }\n  .selo { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: 999px; font-size: 12px; border: 1px solid currentColor; white-space: nowrap; }\n  .selo.ok { color: var(--ok); } .selo.alerta { color: var(--alerta); } .selo.erro { color: var(--erro); }\n  .mudo { color: var(--mudo); }\n  .aviso { border-left: 4px solid var(--alerta); background: var(--superficie); padding: 12px 14px; border-radius: 6px; margin-bottom: 16px; }\n  .erro-caixa { border-left: 4px solid var(--erro); background: var(--superficie); padding: 12px 14px; border-radius: 6px; }\n  .rodape { color: var(--mudo); font-size: 12px; padding: 8px 16px; border-top: 1px solid var(--borda); background: var(--superficie); }\n  @media (max-width: 800px) {\n    .menu-botao { display: inline-block; }\n    .usuario { display: none; }\n    .lateral { position: fixed; top: 53px; left: 0; bottom: 0; z-index: 4; transform: translateX(-100%); transition: transform .2s; box-shadow: var(--sombra); overflow-y: auto; }\n    .lateral.aberta { transform: none; }\n    .conteudo { padding: 16px; }\n  }\n\n  /* ---- componentes da Fase 3 ---- */\n  .barra { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 12px; }\n  .barra input[type=search], .barra select { border: 1px solid var(--borda); background: var(--superficie); color: var(--texto); border-radius: 8px; padding: 7px 10px; font: inherit; min-width: 0; }\n  .barra input[type=search] { flex: 1 1 200px; max-width: 320px; }\n  .espaco { flex: 1; }\n  .botao { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--borda); background: var(--superficie); color: var(--texto); border-radius: 8px; padding: 7px 12px; font: inherit; font-weight: 600; cursor: pointer; white-space: nowrap; }\n  .botao:hover { border-color: var(--mudo); }\n  .botao.primario { background: var(--primaria); border-color: var(--primaria); color: var(--primaria-texto); }\n  .botao.perigo { color: var(--erro); }\n  .botao[disabled] { opacity: .5; cursor: not-allowed; }\n  .abas { display: flex; flex-wrap: wrap; gap: 4px; padding: 3px; background: var(--destaque); border-radius: 10px; margin-bottom: 12px; }\n  .aba { border: 0; background: transparent; color: var(--texto); padding: 6px 10px; border-radius: 8px; font: inherit; font-size: 13px; font-weight: 600; cursor: pointer; }\n  .aba b { color: var(--mudo); font-weight: 600; margin-left: 4px; }\n  .aba[aria-selected=\"true\"] { background: var(--superficie); box-shadow: var(--sombra); }\n  .totais { display: flex; flex-wrap: wrap; gap: 6px 18px; font-size: 13px; color: var(--mudo); margin-bottom: 10px; }\n  .totais strong { color: var(--texto); }\n  tbody tr.clicavel { cursor: pointer; }\n  tbody tr.clicavel:hover td { background: var(--destaque); }\n  .placa { display: inline-block; font-weight: 700; letter-spacing: .06em; font-size: 13px; border: 1.5px solid currentColor; border-radius: 4px; padding: 1px 6px; white-space: nowrap; }\n  .selo.info { color: var(--primaria); } .selo.mudo { color: var(--mudo); }\n  td small, .sub { display: block; color: var(--mudo); font-size: 12px; }\n  .gaveta { position: fixed; inset: 0; z-index: 40; }\n  .veu { position: absolute; inset: 0; background: rgba(8, 12, 18, .45); }\n  .painel-gaveta { position: absolute; top: 0; right: 0; bottom: 0; width: min(620px, 100%); background: var(--superficie); box-shadow: var(--sombra); display: flex; flex-direction: column; outline: none; }\n  .gaveta-topo { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; padding: 16px 20px 12px; border-bottom: 1px solid var(--borda); }\n  .gaveta-topo h2 { margin: 0; font-size: 20px; }\n  .gaveta-corpo { flex: 1; overflow-y: auto; padding: 16px 20px 24px; display: grid; gap: 18px; align-content: start; }\n  .gaveta-rodape { display: flex; gap: 8px; justify-content: flex-end; flex-wrap: wrap; padding: 12px 20px; border-top: 1px solid var(--borda); background: var(--fundo); }\n  .fechar { border: 1px solid var(--borda); background: var(--superficie); color: var(--texto); border-radius: 8px; width: 34px; height: 34px; font-size: 18px; cursor: pointer; flex: none; }\n  .secao h3 { margin: 0 0 8px; font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--mudo); }\n  .kv { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 16px; margin: 0; }\n  .kv dt { font-size: 12px; color: var(--mudo); } .kv dd { margin: 0; overflow-wrap: anywhere; }\n  .form { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 12px; }\n  .campo { display: grid; gap: 4px; min-width: 0; }\n  .campo.inteiro { grid-column: 1 / -1; }\n  .campo > span { font-size: 12px; font-weight: 600; color: var(--mudo); }\n  .campo input, .campo select, .campo textarea { width: 100%; border: 1px solid var(--borda); background: var(--superficie); color: var(--texto); border-radius: 8px; padding: 8px 10px; font: inherit; min-width: 0; }\n  .campo textarea { min-height: 120px; resize: vertical; font-family: ui-monospace, Menlo, monospace; font-size: 13px; }\n  .campo .dica { font-size: 12px; color: var(--mudo); margin: 0; }\n  .campo .dica.erro { color: var(--erro); } .campo .dica.ok { color: var(--ok); }\n  .opcoes { display: grid; gap: 6px; } .opcoes label { display: flex; gap: 8px; align-items: flex-start; }\n  .lista-simples { list-style: none; margin: 0; padding: 0; border: 1px solid var(--borda); border-radius: 8px; overflow: hidden; }\n  .lista-simples li { padding: 8px 12px; border-top: 1px solid var(--borda); display: flex; justify-content: space-between; gap: 8px; flex-wrap: wrap; }\n  .lista-simples li:first-child { border-top: 0; }\n  .caixa { border-radius: 8px; padding: 10px 12px; background: var(--destaque); }\n  .caixa.erro { border-left: 4px solid var(--erro); } .caixa.alerta { border-left: 4px solid var(--alerta); } .caixa.ok { border-left: 4px solid var(--ok); }\n  .aviso-flutuante { position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%); background: var(--texto); color: var(--fundo); padding: 10px 16px; border-radius: 8px; font-weight: 600; z-index: 60; max-width: calc(100% - 32px); }\n  @media (max-width: 560px) { .form, .kv { grid-template-columns: minmax(0, 1fr); } }\n</style>\n\n</head>\n<body>\n  <header class=\"topo\">\n    <button class=\"menu-botao\" id=\"menuBotao\" aria-label=\"Abrir menu\" aria-expanded=\"false\">\u2630</button>\n    <div class=\"marca\">\ud83d\ude9b <strong>Frota Gobor</strong></div>\n    <label class=\"busca\">\n      <span class=\"sr\">Busca global</span>\n      <input id=\"busca\" type=\"search\" placeholder=\"Placa, AIT, MTO ou motorista (em breve)\" disabled>\n    </label>\n    <div class=\"usuario\" id=\"usuario\">carregando\u2026</div>\n  </header>\n  <div class=\"corpo\">\n    <nav class=\"lateral\" id=\"lateral\" aria-label=\"Telas\"></nav>\n    <main id=\"conteudo\" class=\"conteudo\" tabindex=\"-1\">\n      <p class=\"mudo\">Carregando\u2026</p>\n    </main>\n  </div>\n  <div class=\"gaveta\" id=\"gaveta\" hidden><div class=\"veu\" data-fechar=\"1\"></div><section class=\"painel-gaveta\" id=\"painelGaveta\" role=\"dialog\" aria-modal=\"true\" tabindex=\"-1\"></section></div>\n  <div class=\"aviso-flutuante\" id=\"toast\" role=\"status\" hidden></div>\n  <footer class=\"rodape\">Vers\u00e3o 0.3.0 \u00b7 dados no fuso America/Sao_Paulo</footer>\n  <script>var CoreCliente=(()=>{var d=Object.defineProperty;var L=Object.getOwnPropertyDescriptor;var M=Object.getOwnPropertyNames;var h=Object.prototype.hasOwnProperty;var c=(e,t)=>{for(var r in t)d(e,r,{get:t[r],enumerable:!0})},$=(e,t,r,n)=>{if(t&&typeof t==\"object\"||typeof t==\"function\")for(let a of M(t))!h.call(e,a)&&a!==r&&d(e,a,{get:()=>t[a],enumerable:!(n=L(t,a))||n.enumerable});return e};var U=e=>$(d({},\"__esModule\",{value:!0}),e);var H={};c(H,{dataBR:()=>T,moeda:()=>A,parseDataFlex:()=>b,placa:()=>m,renavam:()=>f,rotuloParcela:()=>x});var m={};c(m,{finalDaPlaca:()=>B,formasDaPlaca:()=>V,formatarPlaca:()=>v,formatoPlaca:()=>l,limparPlaca:()=>s,normalizarPlaca:()=>u,paraMercosul:()=>g,placaValida:()=>R,placasEquivalentes:()=>G});var _=\"ABCDEFGHIJ\";function s(e){return e==null?\"\":String(e).toUpperCase().replace(/[^A-Z0-9]/g,\"\")}function l(e){let t=s(e);return/^[A-Z]{3}[0-9]{4}$/.test(t)?\"ANTIGO\":/^[A-Z]{3}[0-9][A-Z][0-9]{2}$/.test(t)?\"MERCOSUL\":null}function R(e){return l(e)!==null}function u(e){let t=s(e),r=l(t);if(!r)return null;if(r===\"ANTIGO\")return t;let n=_.indexOf(t[4]);return n<0?t:t.slice(0,4)+String(n)+t.slice(5)}function g(e){let t=s(e),r=l(t);return r?r===\"MERCOSUL\"?t:t.slice(0,4)+_[Number(t[4])]+t.slice(5):null}function G(e,t){let r=u(e);return r!==null&&r===u(t)}function V(e){let t=u(e);if(!t)return[];let r=g(t);return r&&r!==t?[t,r]:[t]}function v(e){let t=s(e);return l(t)===\"ANTIGO\"?t.slice(0,3)+\"-\"+t.slice(3):t}function B(e){let t=u(e);return t?t[6]:null}var f={};c(f,{analisarRenavam:()=>F,dvRenavam:()=>S,limparRenavam:()=>O,normalizarRenavam:()=>N,renavamValido:()=>C});var w=[2,3,4,5,6,7,8,9,2,3];function O(e){if(e==null||e===\"\")return\"\";let t;if(typeof e==\"number\"){if(!Number.isFinite(e)||!Number.isInteger(e)||e<0)return\"\";t=String(e)}else t=String(e).trim().replace(/\\.0+$/,\"\");return t.replace(/\\D/g,\"\")}function N(e){let t=O(e);return!t||t.length>11?null:t.padStart(11,\"0\")}function S(e){if(!/^\\d{10}$/.test(e))throw new Error(\"Base do RENAVAM deve ter 10 d\u00edgitos\");let t=e.split(\"\").reverse(),r=0;for(let a=0;a<10;a++)r+=Number(t[a])*w[a];let n=r*10%11;return n===10?0:n}function C(e){let t=N(e);return!t||/^0+$/.test(t)?!1:S(t.slice(0,10))===Number(t[10])}function F(e){let t=O(e),r=N(e),n=null;return t?t.length>11?n=`RENAVAM com ${t.length} d\u00edgitos (m\u00e1ximo 11)`:C(e)||(n=\"D\u00edgito verificador inv\u00e1lido\"):n=\"RENAVAM vazio\",{original:e,normalizado:r,valido:n===null,motivo:n}}var A={};c(A,{arredondar2:()=>j,formatarMoeda:()=>z,formatarNumeroBR:()=>D,paraCentavos:()=>E,parseMoeda:()=>Q,somar:()=>y});function Q(e){if(e==null||e===\"\")return null;if(typeof e==\"number\")return Number.isFinite(e)?e:null;let t=String(e).replace(/\u00a0/g,\" \").trim();if(!t)return null;let r=!1;if(/^\\(.*\\)$/.test(t)&&(r=!0,t=t.slice(1,-1)),t=t.replace(/R\\$/gi,\"\").replace(/\\s+/g,\"\"),t.startsWith(\"-\")&&(r=!r,t=t.slice(1)),!/^[\\d.,]+$/.test(t))return null;if(t.includes(\",\")){if(t.indexOf(\",\")!==t.lastIndexOf(\",\"))return null;t=t.replace(/\\./g,\"\").replace(\",\",\".\")}else{let a=(t.match(/\\./g)||[]).length;a>1?t=t.replace(/\\./g,\"\"):a===1&&/^\\d{1,3}\\.\\d{3}$/.test(t)&&(t=t.replace(\".\",\"\"))}if(!/^\\d+(\\.\\d+)?$/.test(t))return null;let n=Number(t);return r?-n:n}function E(e){let t=Number(e);return Math.sign(t)*Math.round(Number((Math.abs(t)*100).toPrecision(15)))}function j(e){return e==null||!Number.isFinite(Number(e))?null:E(e)/100}function y(e){let t=0;for(let r of e)r==null||r===\"\"||(t+=E(r));return t/100}function D(e,t=2){if(e==null||!Number.isFinite(Number(e)))return\"\";let r=Number(e)<0,n=Math.abs(Number(e)).toFixed(t),[a,i]=n.split(\".\"),o=a.replace(/\\B(?=(\\d{3})+(?!\\d))/g,\".\");return(r?\"-\":\"\")+o+(t>0?\",\"+i:\"\")}function z(e){if(e==null||!Number.isFinite(Number(e)))return\"\";let t=D(Math.abs(Number(e)),2);return(Number(e)<0?\"-\":\"\")+\"R$ \"+t}function P(e){return String(e).padStart(2,\"0\")}function p(e,t,r){let n=Number(e),a=Number(t),i=Number(r);if(!Number.isInteger(n)||!Number.isInteger(a)||!Number.isInteger(i)||n<1900||n>2200||a<1||a>12||i<1||i>31)return null;let o=new Date(Date.UTC(n,a-1,i));return o.getUTCFullYear()!==n||o.getUTCMonth()!==a-1||o.getUTCDate()!==i?null:`${n}-${P(a)}-${P(i)}`}function I(e){if(typeof e!=\"string\"||!/^\\d{4}-\\d{2}-\\d{2}$/.test(e))return!1;let[t,r,n]=e.split(\"-\");return p(t,r,n)===e}function q(e){if(e==null)return null;let t=String(e).trim().match(/^(\\d{1,2})[/.-](\\d{1,2})[/.-](\\d{2}|\\d{4})$/);if(!t)return null;let r=t[3].length===2?2e3+Number(t[3]):Number(t[3]);return p(r,t[2],t[1])}function b(e){if(e==null||e===\"\")return null;if(e instanceof Date)return Number.isNaN(e.getTime())?null:p(e.getFullYear(),e.getMonth()+1,e.getDate());let t=String(e).trim(),r=t.match(/^(\\d{4})-(\\d{2})-(\\d{2})(?:[T ].*)?$/);if(r)return p(r[1],r[2],r[3]);let n=t.replace(/\\s+\\d{1,2}:\\d{2}(:\\d{2})?$/,\"\");return q(n)}function T(e){if(!I(e))return\"\";let[t,r,n]=e.split(\"-\");return`${n}/${r}/${t}`}function x(e){return String(e)===\"U\"?\"cota \u00fanica\":`${e}\u00aa parcela`}return U(H);})();\n\nvar Core={placa:CoreCliente.placa,renavam:CoreCliente.renavam,moeda:CoreCliente.moeda,datas:{dataBR:CoreCliente.dataBR,parseDataFlex:CoreCliente.parseDataFlex},obrigacoes:{rotuloParcela:CoreCliente.rotuloParcela}};</script>\n  <script>\n  (function () {\n    'use strict';\n\n    // Telas do painel (prompt \u00a77). `perfis` vazio = todos os perfis cadastrados.\n    var TELAS = [\n      { id: 'visao-geral', titulo: '\ud83c\udfe0 Vis\u00e3o Geral', fase: '4', perfis: [] },\n      { id: 'agenda', titulo: '\ud83d\udcc5 Agenda', fase: '4', perfis: [] },\n      { id: 'ipva-licenciamento', titulo: '\ud83e\uddfe IPVA & Licenciamento', fase: '3', perfis: [], pronta: true },\n      { id: 'multas', titulo: '\ud83d\udea8 Multas', fase: '5', perfis: [] },\n      { id: 'motoristas', titulo: '\ud83d\udc77 Motoristas', fase: '6', perfis: ['ADMIN', 'FINANCEIRO', 'DP'] },\n      { id: 'folha', titulo: '\ud83d\udcbc Folha do m\u00eas', fase: '6', perfis: ['ADMIN', 'FINANCEIRO', 'DP'] },\n      { id: 'veiculos', titulo: '\ud83d\ude9b Ve\u00edculos', fase: '3', perfis: [], pronta: true },\n      { id: 'locatarios', titulo: '\ud83e\udd1d Locat\u00e1rios & Repasses', fase: '8', perfis: [] },\n      { id: 'custos', titulo: '\ud83d\udcca Custos & Gerencial', fase: '4', perfis: [] },\n      { id: 'revisao', titulo: '\ud83d\udce5 Fila de Revis\u00e3o', fase: '5', perfis: ['ADMIN', 'FINANCEIRO'] },\n      { id: 'admin', titulo: '\u2699\ufe0f Admin', fase: '1', perfis: ['ADMIN'], pronta: true }\n    ];\n\n    var ROTULOS = {\n      STATUS: { PREVISTO: 'Previsto', GUIA_DISPONIVEL: 'Guia dispon\u00edvel', LANCADO_ERP: 'Lan\u00e7ado no ERP', PAGO: 'Pago', PAGO_SEM_LANCAMENTO: 'Pago sem lan\u00e7amento', ISENTO: 'Isento', NAO_APLICA: 'N\u00e3o se aplica', CANCELADO: 'Cancelado', BLOQUEADO: 'Bloqueado' },\n      PRAZO: { VENCIDO: ['Vencido', 'erro'], VENCE_HOJE: ['Vence hoje', 'erro'], VENCE_EM_7_DIAS: ['Vence em breve', 'alerta'], EM_DIA: ['Em dia', 'mudo'] },\n      IPVA: { QUITADO: ['IPVA quitado', 'ok'], EM_DIA: ['IPVA em dia', 'info'], VENCIDO: ['IPVA vencido', 'erro'], ISENTO: ['Isento', 'mudo'], NAO_GERADO: ['Sem IPVA', 'mudo'] },\n      LIC: { LICENCIADO: ['Licenciado', 'ok'], QUITADO_SEM_CRLV: ['Pago, falta CRLV', 'alerta'], EM_DIA: ['A licenciar', 'info'], VENCIDO: ['Licenc. vencido', 'erro'], NAO_GERADO: ['N\u00e3o gerado', 'mudo'] },\n      FILAS: [['TODAS', 'Todas'], ['A_LANCAR_ERP', 'A lan\u00e7ar no ERP'], ['PAGO_SEM_LANCAMENTO', 'Pagos sem lan\u00e7amento'], ['VENCIDOS', 'Vencidos'], ['BLOQUEADOS', 'Bloqueados'], ['SEM_ESTIMATIVA', 'Sem estimativa']],\n      SITUACAO: { OPERACAO_PROPRIA: 'Opera\u00e7\u00e3o pr\u00f3pria', LOCADO_TERCEIRO: 'Locado', PARADO: 'Parado', A_VENDA: '\u00c0 venda', VENDIDO: 'Vendido', BAIXADO: 'Baixado', EM_TRANSFERENCIA: 'Em transfer\u00eancia', HISTORICO: 'Hist\u00f3rico' }\n    };\n\n    var estado = { perfil: null, eu: null, veic: null, obr: null, filtrosVeic: { q: '', uf: '', filial: '', tipo: '', situacao: '', alerta: '' }, filtrosObr: { fila: 'TODAS', q: '', tributo: '', uf: '', filial: '', mes: '' } };\n\n    // ------------------------------------------------------------ utilidades\n    function el(tag, atributos, filhos) {\n      var e = document.createElement(tag);\n      Object.keys(atributos || {}).forEach(function (k) {\n        var v = atributos[k];\n        if (v === null || v === undefined || v === false) return;\n        if (k === 'texto') e.textContent = v;\n        else if (k === 'classe') e.className = v;\n        else if (k.indexOf('on') === 0 && typeof v === 'function') e.addEventListener(k.slice(2), v);\n        else if (k === 'valor') e.value = v;\n        else e.setAttribute(k, v === true ? '' : v);\n      });\n      (filhos || []).forEach(function (f) { if (f !== null && f !== undefined && f !== false) e.appendChild(typeof f === 'string' ? document.createTextNode(f) : f); });\n      return e;\n    }\n    function chamar(rota, args) {\n      return new Promise(function (resolve, reject) {\n        google.script.run\n          .withSuccessHandler(function (r) { (r && r.ok) ? resolve(r.dados) : reject(new Error(r ? r.erro : 'Sem resposta do servidor')); })\n          .withFailureHandler(function (e) { reject(e instanceof Error ? e : new Error(String(e))); })\n          .api(rota, args || {});\n      });\n    }\n    function numeroBR(n) { return n === null || n === undefined ? '\u2014' : Number(n).toLocaleString('pt-BR'); }\n    function moeda(n) { return n === null || n === undefined || n === '' ? '\u2014' : Core.moeda.formatarMoeda(n); }\n    function dataBR(iso) { return iso ? Core.datas.dataBR(String(iso).slice(0, 10)) : '\u2014'; }\n    function selo(par) { return el('span', { classe: 'selo ' + par[1], texto: par[0] }); }\n    function placa(p) { return el('span', { classe: 'placa', texto: Core.placa.formatarPlaca(p) }); }\n    function podeEditar() { return estado.perfil === 'ADMIN' || estado.perfil === 'FINANCEIRO'; }\n    function toast(msg) {\n      var t = document.getElementById('toast');\n      t.textContent = msg; t.hidden = false;\n      clearTimeout(toast._t); toast._t = setTimeout(function () { t.hidden = true; }, 4000);\n    }\n    function conteudo() { var c = document.getElementById('conteudo'); c.innerHTML = ''; return c; }\n    function mostrarErro(mensagem, alvo) {\n      var c = alvo || conteudo();\n      c.appendChild(el('div', { classe: 'erro-caixa' }, [el('strong', { texto: 'N\u00e3o foi poss\u00edvel concluir. ' }), document.createTextNode(mensagem)]));\n    }\n    function carregando(c, txt) { c.appendChild(el('p', { classe: 'mudo', texto: txt || 'Carregando\u2026' })); }\n    function opcoes(select, lista, atual) {\n      lista.forEach(function (o) {\n        var valor = Array.isArray(o) ? o[0] : o, rotulo = Array.isArray(o) ? o[1] : o;\n        var op = el('option', { value: valor, texto: rotulo });\n        if (String(valor) === String(atual || '')) op.selected = true;\n        select.appendChild(op);\n      });\n      return select;\n    }\n    function semAcento(s) { return String(s || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, ''); }\n    function baixar(nome, texto) {\n      try {\n        var blob = new Blob(['\ufeff' + texto], { type: 'text/csv;charset=utf-8' });\n        var a = el('a', { href: URL.createObjectURL(blob), download: nome });\n        document.body.appendChild(a); a.click(); a.remove();\n        toast('Arquivo ' + nome + ' gerado');\n      } catch (e) {\n        var ta = el('textarea', { readonly: true, style: 'width:100%;min-height:300px' }); ta.value = texto;\n        abrirGaveta('Copie o CSV', nome, el('div', {}, [el('p', { classe: 'mudo', texto: 'O navegador n\u00e3o permitiu baixar. Copie o conte\u00fado abaixo.' }), ta]), []);\n      }\n    }\n\n    // ------------------------------------------------------------ gaveta\n    function abrirGaveta(titulo, subtitulo, corpo, botoes) {\n      var g = document.getElementById('gaveta'), p = document.getElementById('painelGaveta');\n      p.innerHTML = '';\n      p.appendChild(el('div', { classe: 'gaveta-topo' }, [\n        el('div', {}, [el('h2', { texto: titulo }), subtitulo ? el('div', { classe: 'mudo', texto: subtitulo }) : null]),\n        el('button', { classe: 'fechar', 'aria-label': 'Fechar', texto: '\u00d7', onclick: fecharGaveta })\n      ]));\n      p.appendChild(el('div', { classe: 'gaveta-corpo' }, [corpo]));\n      if (botoes && botoes.length) p.appendChild(el('div', { classe: 'gaveta-rodape' }, botoes));\n      g.hidden = false; p.focus();\n    }\n    function fecharGaveta() { document.getElementById('gaveta').hidden = true; }\n    document.getElementById('gaveta').addEventListener('click', function (e) { if (e.target.getAttribute('data-fechar')) fecharGaveta(); });\n    document.addEventListener('keydown', function (e) { if (e.key === 'Escape') fecharGaveta(); });\n\n    function campo(rotulo, controle, dica, inteiro) {\n      return el('label', { classe: 'campo' + (inteiro ? ' inteiro' : '') }, [el('span', { texto: rotulo }), controle, dica || null]);\n    }\n    function entrada(nome, valor, extra) { return el('input', Object.assign({ name: nome, valor: valor === null || valor === undefined ? '' : String(valor) }, extra || {})); }\n    function valoresDoForm(form) {\n      var r = {};\n      Array.prototype.forEach.call(form.querySelectorAll('[name]'), function (c) {\n        if (c.type === 'radio') { if (c.checked) r[c.name] = c.value; return; }\n        if (c.type === 'checkbox') { r[c.name] = c.checked ? 'S' : 'N'; return; }\n        r[c.name] = c.value;\n      });\n      return r;\n    }\n\n    // ------------------------------------------------------------ menu e rotas\n    function telasPermitidas() { return TELAS.filter(function (t) { return !t.perfis.length || t.perfis.indexOf(estado.perfil) >= 0; }); }\n    function montarMenu(atual) {\n      var nav = document.getElementById('lateral'); nav.innerHTML = '';\n      telasPermitidas().forEach(function (t) {\n        var a = el('a', { href: '#/' + t.id }, [el('span', { texto: t.titulo }), t.pronta ? null : el('span', { classe: 'fase', texto: 'F' + t.fase })]);\n        if (t.id === atual) a.setAttribute('aria-current', 'page');\n        nav.appendChild(a);\n      });\n    }\n    function telaEmConstrucao(t) {\n      var c = conteudo();\n      c.appendChild(el('h1', { texto: t.titulo }));\n      c.appendChild(el('p', { classe: 'subtitulo', texto: 'Esta tela chega na Fase ' + t.fase + ' do projeto.' }));\n    }\n\n    // ------------------------------------------------------------ vis\u00e3o geral e admin\n    function telaVisaoGeral() {\n      var c = conteudo();\n      c.appendChild(el('h1', { texto: '\ud83c\udfe0 Vis\u00e3o Geral' }));\n      c.appendChild(el('p', { classe: 'subtitulo', texto: 'Hoje \u00e9 ' + dataBR(estado.eu.hoje) + '. Os indicadores completos chegam na Fase 4.' }));\n      var grade = el('div', { classe: 'grade' }); c.appendChild(grade);\n      chamar('statusBase').then(function (d) {\n        var mapa = {}; d.tabelas.forEach(function (t) { mapa[t.nome] = t.registros; });\n        [['Ve\u00edculos', 'VEICULOS', '#/veiculos'], ['Obriga\u00e7\u00f5es', 'OBRIGACOES', '#/ipva-licenciamento'], ['Loca\u00e7\u00f5es', 'LOCACOES', null], ['Filiais', 'FILIAIS', null]].forEach(function (p) {\n          var cartao = el('div', { classe: 'cartao' }, [el('div', { classe: 'rotulo', texto: p[0] }), el('div', { classe: 'valor', texto: numeroBR(mapa[p[1]]) })]);\n          grade.appendChild(p[2] ? el('a', { href: p[2], style: 'text-decoration:none;color:inherit' }, [cartao]) : cartao);\n        });\n      }).catch(function (e) { mostrarErro(e.message); });\n    }\n    function telaAdmin() {\n      var c = conteudo();\n      c.appendChild(el('h1', { texto: '\u2699\ufe0f Admin' }));\n      c.appendChild(el('p', { classe: 'subtitulo', texto: 'Estado das tabelas da base.' }));\n      var caixa = el('div', { classe: 'tabela-envoltorio' }); carregando(caixa); c.appendChild(caixa);\n      chamar('statusBase').then(function (d) {\n        var tbody = el('tbody');\n        d.tabelas.forEach(function (t) {\n          tbody.appendChild(el('tr', {}, [\n            el('td', {}, [el('strong', { texto: t.nome }), el('small', { texto: t.descricao })]),\n            el('td', { texto: t.planilha === 'MOTORISTAS' ? '\ud83d\udd12 Restrita' : 'Base' }),\n            el('td', { classe: 'num', texto: numeroBR(t.registros) }),\n            el('td', {}, [t.erro ? selo(['\u2716 ' + t.erro, 'erro']) : selo(['\u2714 ok', 'ok'])])\n          ]));\n        });\n        caixa.innerHTML = '';\n        caixa.appendChild(el('table', {}, [el('thead', {}, [el('tr', {}, ['Tabela', 'Planilha', 'Registros', 'Situa\u00e7\u00e3o'].map(function (h) { return el('th', { texto: h }); }))]), tbody]));\n      }).catch(function (e) { caixa.innerHTML = ''; mostrarErro(e.message, caixa); });\n    }\n\n    // ------------------------------------------------------------ ve\u00edculos\n    function nomeFilial(cnpj) {\n      var f = (estado.veic.filiais || []).filter(function (x) { return x.cnpj === cnpj; })[0];\n      return f ? f.nome_curto : (cnpj || '\u2014');\n    }\n    function seloIpva(v) {\n      if (v.ipva === 'NAO_GERADO' && v.categoria === 'IMPLEMENTO') return selo(['N\u00e3o tributado', 'mudo']);\n      return selo(ROTULOS.IPVA[v.ipva] || [v.ipva, 'mudo']);\n    }\n    function filtrarVeiculos() {\n      var f = estado.filtrosVeic, q = semAcento(f.q).trim(), qPlaca = Core.placa.normalizarPlaca(f.q);\n      return estado.veic.veiculos.filter(function (v) {\n        if (f.uf && v.uf_registro !== f.uf) return false;\n        if (f.filial && v.cnpj_proprietario !== f.filial) return false;\n        if (f.tipo && v.tipo !== f.tipo) return false;\n        if (f.situacao && v.situacao !== f.situacao) return false;\n        if (f.alerta === 'IPVA_VENCIDO' && v.ipva !== 'VENCIDO') return false;\n        if (f.alerta === 'LIC_VENCIDO' && v.licenciamento !== 'VENCIDO') return false;\n        if (f.alerta === 'LOCADOS' && v.situacao !== 'LOCADO_TERCEIRO') return false;\n        if (q) {\n          var alvo = semAcento([v.placa, v.renavam, v.marca_modelo, v.locatario, v.veiculo_id].join(' '));\n          if (!(qPlaca && v.placa_norm === qPlaca) && alvo.indexOf(q) < 0) return false;\n        }\n        return true;\n      });\n    }\n    function telaVeiculos() {\n      var c = conteudo();\n      c.appendChild(el('h1', { texto: '\ud83d\ude9b Ve\u00edculos' }));\n      var sub = el('p', { classe: 'subtitulo', texto: 'Carregando\u2026' }); c.appendChild(sub);\n      var area = el('div'); c.appendChild(area);\n      chamar('listarVeiculos').then(function (d) {\n        estado.veic = d;\n        sub.textContent = d.veiculos.length + ' ve\u00edculos \u00b7 situa\u00e7\u00e3o documental do exerc\u00edcio ' + d.exercicio + ' (hoje, ' + dataBR(d.hoje) + ')';\n        desenharVeiculos(area);\n      }).catch(function (e) { sub.textContent = ''; mostrarErro(e.message, area); });\n    }\n    function desenharVeiculos(area) {\n      area.innerHTML = '';\n      var f = estado.filtrosVeic, d = estado.veic;\n      var tabelaArea = el('div');\n      function redesenhar() { desenharTabelaVeiculos(tabelaArea); }\n      function filtro(chave, controle) { controle.addEventListener('input', function () { f[chave] = controle.value; redesenhar(); }); return controle; }\n      var barra = el('div', { classe: 'barra' }, [\n        filtro('q', el('input', { type: 'search', placeholder: 'Placa (qualquer formato), RENAVAM, modelo, locat\u00e1rio', valor: f.q })),\n        filtro('uf', opcoes(el('select'), [['', 'Todas as UFs']].concat(['PR', 'SP', 'SC', 'GO', 'RO', 'MT']), f.uf)),\n        filtro('filial', opcoes(el('select'), [['', 'Todas as filiais']].concat(d.filiais.map(function (x) { return [x.cnpj, x.nome_curto]; })), f.filial)),\n        filtro('tipo', opcoes(el('select'), [['', 'Todos os tipos']].concat(d.enums.TIPO_VEICULO), f.tipo)),\n        filtro('situacao', opcoes(el('select'), [['', 'Todas as situa\u00e7\u00f5es']].concat(d.enums.SITUACAO_VEICULO.map(function (s) { return [s, ROTULOS.SITUACAO[s] || s]; })), f.situacao)),\n        filtro('alerta', opcoes(el('select'), [['', 'Sem filtro de alerta'], ['IPVA_VENCIDO', 'IPVA vencido'], ['LIC_VENCIDO', 'Licenciamento vencido'], ['LOCADOS', 'S\u00f3 locados']], f.alerta)),\n        el('span', { classe: 'espaco' }),\n        d.podeEditar ? el('button', { classe: 'botao primario', texto: '+ Novo ve\u00edculo', onclick: function () { abrirFormVeiculo(null); } }) : null\n      ]);\n      area.appendChild(barra);\n      area.appendChild(tabelaArea);\n      redesenhar();\n    }\n    function desenharTabelaVeiculos(alvo) {\n      alvo.innerHTML = '';\n      var lista = filtrarVeiculos();\n      alvo.appendChild(el('div', { classe: 'totais' }, [el('span', {}, [el('strong', { texto: String(lista.length) }), ' ve\u00edculo(s)'])]));\n      var tbody = el('tbody');\n      lista.slice(0, 500).forEach(function (v) {\n        tbody.appendChild(el('tr', { classe: 'clicavel', onclick: function () { abrirFichaVeiculo(v.veiculo_id); } }, [\n          el('td', {}, [placa(v.placa), el('small', { texto: v.veiculo_id })]),\n          el('td', {}, [document.createTextNode(v.tipo || '\u2014'), el('small', { texto: v.marca_modelo || '' })]),\n          el('td', {}, [document.createTextNode(nomeFilial(v.cnpj_proprietario)), el('small', { texto: v.uf_registro })]),\n          el('td', {}, [document.createTextNode(ROTULOS.SITUACAO[v.situacao] || v.situacao), v.locatario ? el('small', { texto: v.locatario }) : null]),\n          el('td', {}, [seloIpva(v)]),\n          el('td', {}, [selo(ROTULOS.LIC[v.licenciamento] || [v.licenciamento, 'mudo'])])\n        ]));\n      });\n      alvo.appendChild(el('div', { classe: 'tabela-envoltorio' }, [el('table', {}, [\n        el('thead', {}, [el('tr', {}, ['Placa', 'Tipo', 'Filial', 'Situa\u00e7\u00e3o', 'IPVA ' + estado.veic.exercicio, 'Licenciamento ' + estado.veic.exercicio].map(function (h) { return el('th', { texto: h }); }))]),\n        tbody\n      ])]));\n      if (lista.length > 500) alvo.appendChild(el('p', { classe: 'mudo', texto: 'Mostrando 500 de ' + lista.length + '. Use os filtros.' }));\n    }\n    function abrirFichaVeiculo(id) {\n      abrirGaveta('Carregando\u2026', '', el('p', { classe: 'mudo', texto: 'Buscando o ve\u00edculo\u2026' }), []);\n      chamar('fichaVeiculo', { veiculo_id: id }).then(function (d) {\n        var v = d.veiculo;\n        var kv = el('dl', { classe: 'kv' });\n        [['RENAVAM', v.renavam], ['Chassi', v.chassi], ['Tipo', v.tipo + ' (' + (v.categoria || '') + ')'], ['Marca/modelo', v.marca_modelo],\n          ['Ano', [v.ano_fabricacao, v.ano_modelo].filter(Boolean).join('/')], ['Filial', nomeFilial(v.cnpj_proprietario) + ' \u00b7 ' + (v.cnpj_proprietario || '')],\n          ['UF de registro', v.uf_registro], ['Situa\u00e7\u00e3o', ROTULOS.SITUACAO[v.situacao] || v.situacao], ['Isento de IPVA', v.isento_ipva === 'S' ? 'Sim (' + (v.motivo_isencao || '') + ')' : 'N\u00e3o'],\n          ['Forma de pgto. IPVA', v.forma_pgto_ipva_padrao || 'padr\u00e3o da CONFIG'], ['Venda/baixa', dataBR(v.data_venda)], ['Observa\u00e7\u00f5es', v.observacoes]\n        ].forEach(function (p) { kv.appendChild(el('div', {}, [el('dt', { texto: p[0] }), el('dd', { texto: p[1] === null || p[1] === undefined || p[1] === '' ? '\u2014' : String(p[1]) })])); });\n        var obr = el('ul', { classe: 'lista-simples' });\n        if (!d.obrigacoes.length) obr.appendChild(el('li', { classe: 'mudo', texto: 'Nenhuma obriga\u00e7\u00e3o gerada.' }));\n        d.obrigacoes.forEach(function (o) {\n          obr.appendChild(el('li', {}, [\n            el('span', {}, [el('strong', { texto: o.tributo + ' ' + o.exercicio + ' \u00b7 ' + Core.obrigacoes.rotuloParcela(o.parcela) }), el('small', { texto: 'Vence ' + dataBR(o.vencimento) + (o.nr_lancamento_erp ? ' \u00b7 ' + o.nr_lancamento_erp : '') })]),\n            el('span', {}, [document.createTextNode(moeda(o.valor) + (o.camada ? ' (' + o.camada.toLowerCase() + ') ' : ' ')), selo([ROTULOS.STATUS[o.status] || o.status, o.status.indexOf('PAGO') === 0 ? 'ok' : (ROTULOS.PRAZO[o.situacao_prazo] || ['', 'mudo'])[1]])])\n          ]));\n        });\n        var loc = el('ul', { classe: 'lista-simples' });\n        if (!d.locacoes.length) loc.appendChild(el('li', { classe: 'mudo', texto: 'Sem loca\u00e7\u00f5es registradas.' }));\n        d.locacoes.forEach(function (l) {\n          loc.appendChild(el('li', {}, [el('span', {}, [el('strong', { texto: l.locatario }), el('small', { texto: (l.contrato_ref || '') })]), el('span', { texto: dataBR(l.inicio) + ' \u2192 ' + (l.fim ? dataBR(l.fim) : 'vigente') })]));\n        });\n        var corpo = el('div', {}, [\n          el('div', { classe: 'secao' }, [el('h3', { texto: 'Cadastro' }), kv]),\n          el('div', { classe: 'secao' }, [el('h3', { texto: 'Obriga\u00e7\u00f5es' }), obr]),\n          el('div', { classe: 'secao' }, [el('h3', { texto: 'Loca\u00e7\u00f5es (painel de loca\u00e7\u00e3o)' }), loc])\n        ]);\n        var botoes = podeEditar() ? [\n          el('button', { classe: 'botao', texto: 'Editar', onclick: function () { abrirFormVeiculo(v); } }),\n          el('button', { classe: 'botao', texto: 'Transferir', onclick: function () { abrirTransferir(v); } }),\n          ['VENDIDO', 'BAIXADO'].indexOf(v.situacao) < 0 ? el('button', { classe: 'botao perigo', texto: 'Vender / baixar', onclick: function () { abrirVender(v); } }) : null\n        ] : [];\n        abrirGaveta(Core.placa.formatarPlaca(v.placa), v.veiculo_id + ' \u00b7 ' + (v.tipo || ''), corpo, botoes);\n      }).catch(function (e) { abrirGaveta('Erro', '', el('div', { classe: 'caixa erro', texto: e.message }), []); });\n    }\n    function abrirFormVeiculo(v) {\n      var novo = !v; v = v || { situacao: 'OPERACAO_PROPRIA', tipo: '', isento_ipva: 'N' };\n      var d = estado.veic;\n      var form = el('form', { classe: 'form', onsubmit: function (e) { e.preventDefault(); } });\n      var dicaPlaca = el('p', { classe: 'dica' }), dicaRen = el('p', { classe: 'dica' });\n      var inPlaca = entrada('placa', v.placa, { required: true, autocomplete: 'off', style: 'text-transform:uppercase' });\n      var inRen = entrada('renavam', v.renavam, { inputmode: 'numeric', autocomplete: 'off' });\n      function outros() { return d.veiculos.filter(function (x) { return x.veiculo_id !== v.veiculo_id; }); }\n      function checarPlaca() {\n        var val = inPlaca.value, fmt = Core.placa.formatoPlaca(val), n = Core.placa.normalizarPlaca(val);\n        if (!val) { dicaPlaca.textContent = ''; return; }\n        if (!fmt) { dicaPlaca.className = 'dica erro'; dicaPlaca.textContent = 'Formato inv\u00e1lido (ABC1234 ou ABC1D23)'; return; }\n        var dup = outros().filter(function (x) { return x.placa_norm === n; })[0];\n        dicaPlaca.className = dup ? 'dica erro' : 'dica ok';\n        dicaPlaca.textContent = dup ? 'Equivale a ' + dup.placa + ' (' + dup.veiculo_id + ', ' + (ROTULOS.SITUACAO[dup.situacao] || dup.situacao) + ')' : (fmt === 'MERCOSUL' ? 'Mercosul \u00b7 equivale a ' + n : 'Formato antigo \u00b7 Mercosul ' + Core.placa.paraMercosul(val));\n      }\n      function checarRen() {\n        var val = inRen.value;\n        if (!val) { dicaRen.className = 'dica'; dicaRen.textContent = 'Obrigat\u00f3rio para ve\u00edculo ativo'; return; }\n        var r = Core.renavam.normalizarRenavam(val);\n        if (!Core.renavam.renavamValido(val)) { dicaRen.className = 'dica erro'; dicaRen.textContent = 'D\u00edgito verificador inv\u00e1lido'; return; }\n        var dup = outros().filter(function (x) { return x.renavam === r; })[0];\n        dicaRen.className = dup ? 'dica erro' : 'dica ok';\n        dicaRen.textContent = dup ? 'J\u00e1 pertence a ' + dup.placa + ' (' + dup.veiculo_id + ')' : 'V\u00e1lido \u00b7 ' + r;\n      }\n      inPlaca.addEventListener('input', checarPlaca); inRen.addEventListener('input', checarRen);\n      var selFilial = opcoes(el('select', { name: 'cnpj_proprietario', required: true }), [['', 'Escolha a filial']].concat(d.filiais.filter(function (f) { return f.ativo !== 'N' || f.cnpj === v.cnpj_proprietario; }).map(function (f) { return [f.cnpj, f.nome_curto + ' (' + f.uf + ')']; })), v.cnpj_proprietario);\n      var selUf = opcoes(el('select', { name: 'uf_registro', required: true }), [['', 'UF']].concat(d.enums.UF), v.uf_registro);\n      selFilial.addEventListener('change', function () { var f = d.filiais.filter(function (x) { return x.cnpj === selFilial.value; })[0]; if (f && !selUf.value) selUf.value = f.uf; });\n      [\n        campo('Placa *', inPlaca, dicaPlaca), campo('RENAVAM', inRen, dicaRen),\n        campo('Tipo *', opcoes(el('select', { name: 'tipo', required: true }), [['', 'Escolha']].concat(d.enums.TIPO_VEICULO), v.tipo)),\n        campo('Situa\u00e7\u00e3o *', opcoes(el('select', { name: 'situacao' }), d.enums.SITUACAO_VEICULO.filter(function (s) { return novo ? ['VENDIDO', 'BAIXADO', 'HISTORICO'].indexOf(s) < 0 : true; }).map(function (s) { return [s, ROTULOS.SITUACAO[s] || s]; }), v.situacao)),\n        campo('Filial (CNPJ) *', selFilial), campo('UF de registro *', selUf),\n        campo('Munic\u00edpio de registro', entrada('municipio_registro', v.municipio_registro)), campo('Chassi', entrada('chassi', v.chassi)),\n        campo('Marca/modelo', entrada('marca_modelo', v.marca_modelo), null, true),\n        campo('Ano de fabrica\u00e7\u00e3o', entrada('ano_fabricacao', v.ano_fabricacao, { inputmode: 'numeric' })), campo('Ano do modelo', entrada('ano_modelo', v.ano_modelo, { inputmode: 'numeric' })),\n        campo('Data de aquisi\u00e7\u00e3o', entrada('data_aquisicao', v.data_aquisicao, { type: 'date' })),\n        campo('Forma de pagamento do IPVA', opcoes(el('select', { name: 'forma_pgto_ipva_padrao' }), [['', 'Padr\u00e3o da CONFIG']].concat(d.enums.FORMA_PGTO_IPVA), v.forma_pgto_ipva_padrao)),\n        campo('Isento de IPVA', opcoes(el('select', { name: 'isento_ipva' }), [['N', 'N\u00e3o'], ['S', 'Sim']], v.isento_ipva || 'N')), campo('Motivo da isen\u00e7\u00e3o', entrada('motivo_isencao', v.motivo_isencao)),\n        campo('Observa\u00e7\u00f5es', el('textarea', { name: 'observacoes', style: 'min-height:60px;font-family:inherit' }, [v.observacoes || '']), null, true)\n      ].forEach(function (x) { form.appendChild(x); });\n      if (novo) {\n        form.appendChild(campo('Exerc\u00edcio ' + d.exercicio, el('div', { classe: 'opcoes' }, [\n          el('label', {}, [el('input', { type: 'radio', name: 'exercicioAcao', value: 'GERAR', checked: true }), el('span', { texto: 'Gerar as obriga\u00e7\u00f5es deste exerc\u00edcio (IPVA e licenciamento)' })]),\n          el('label', {}, [el('input', { type: 'radio', name: 'exercicioAcao', value: 'QUITADAS' }), el('span', { texto: 'J\u00e1 est\u00e1 quitado (zero-km emplacado ou usado comprado com o ano pago)' })]),\n          el('label', {}, [el('input', { type: 'radio', name: 'exercicioAcao', value: 'DEPOIS' }), el('span', { texto: 'Deixar para a pr\u00f3xima gera\u00e7\u00e3o do exerc\u00edcio' })])\n        ]), null, true));\n      }\n      checarPlaca(); checarRen();\n      var avisoArea = el('div');\n      var corpo = el('div', {}, [form, avisoArea]);\n      function salvar(confirmar) {\n        var dados = valoresDoForm(form);\n        var acao = dados.exercicioAcao; delete dados.exercicioAcao;\n        dados.placa = Core.placa.limparPlaca(dados.placa);\n        if (!novo) dados.veiculo_id = v.veiculo_id;\n        botaoSalvar.disabled = true; avisoArea.innerHTML = '';\n        chamar('salvarVeiculo', { veiculo: dados, novo: novo, exercicioAcao: acao, confirmarAvisos: !!confirmar, exercicio: d.exercicio }).then(function (r) {\n          botaoSalvar.disabled = false;\n          if (!r.ok) {\n            avisoArea.appendChild(el('div', { classe: 'caixa alerta' }, [el('strong', { texto: 'Confira antes de salvar:' }), el('ul', {}, r.avisos.map(function (a) { return el('li', { texto: a }); })),\n              el('button', { classe: 'botao primario', texto: 'Salvar mesmo assim', onclick: function () { salvar(true); } })]));\n            return;\n          }\n          var msg = (novo ? 'Ve\u00edculo ' + r.veiculo_id + ' cadastrado' : 'Cadastro atualizado') + (r.exercicio ? ' \u00b7 ' + r.exercicio.geradas + ' obriga\u00e7\u00e3o(\u00f5es) criada(s)' : '');\n          toast(msg); fecharGaveta(); telaVeiculos();\n        }).catch(function (e) { botaoSalvar.disabled = false; avisoArea.appendChild(el('div', { classe: 'caixa erro', texto: e.message })); });\n      }\n      var botaoSalvar = el('button', { classe: 'botao primario', texto: novo ? 'Cadastrar ve\u00edculo' : 'Salvar altera\u00e7\u00f5es', onclick: function () { salvar(false); } });\n      abrirGaveta(novo ? 'Novo ve\u00edculo' : 'Editar ' + Core.placa.formatarPlaca(v.placa), novo ? 'Placa, filial, tipo e situa\u00e7\u00e3o s\u00e3o obrigat\u00f3rios' : v.veiculo_id, corpo, [el('button', { classe: 'botao', texto: 'Cancelar', onclick: fecharGaveta }), botaoSalvar]);\n    }\n    function abrirTransferir(v) {\n      var d = estado.veic;\n      var form = el('form', { classe: 'form', onsubmit: function (e) { e.preventDefault(); } }, [\n        campo('Nova filial (CNPJ)', opcoes(el('select', { name: 'cnpj' }), d.filiais.filter(function (f) { return f.ativo !== 'N'; }).map(function (f) { return [f.cnpj, f.nome_curto + ' (' + f.uf + ')']; }), v.cnpj_proprietario)),\n        campo('UF de registro', opcoes(el('select', { name: 'uf' }), [['', 'A da filial']].concat(d.enums.UF), '')),\n        campo('Munic\u00edpio', entrada('municipio', v.municipio_registro)), campo('Data', entrada('data', estado.veic.hoje, { type: 'date' })),\n        el('p', { classe: 'mudo inteiro', style: 'grid-column:1/-1', texto: 'Vale para os exerc\u00edcios seguintes. As obriga\u00e7\u00f5es j\u00e1 geradas mant\u00eam a filial e a UF que tinham.' })\n      ]);\n      var msg = el('div');\n      abrirGaveta('Transferir ' + Core.placa.formatarPlaca(v.placa), v.veiculo_id, el('div', {}, [form, msg]), [\n        el('button', { classe: 'botao', texto: 'Cancelar', onclick: fecharGaveta }),\n        el('button', { classe: 'botao primario', texto: 'Transferir', onclick: function () {\n          var dados = valoresDoForm(form); dados.veiculo_id = v.veiculo_id;\n          chamar('transferirVeiculo', dados).then(function (r) { toast(r.nota); fecharGaveta(); telaVeiculos(); }).catch(function (e) { msg.innerHTML = ''; msg.appendChild(el('div', { classe: 'caixa erro', texto: e.message })); });\n        } })\n      ]);\n    }\n    function abrirVender(v) {\n      var form = el('form', { classe: 'form', onsubmit: function (e) { e.preventDefault(); } }, [\n        campo('Situa\u00e7\u00e3o', opcoes(el('select', { name: 'situacao' }), [['VENDIDO', 'Vendido'], ['BAIXADO', 'Baixado']], 'VENDIDO')),\n        campo('Data *', entrada('data', '', { type: 'date', required: true })),\n        el('p', { classe: 'mudo', style: 'grid-column:1/-1', texto: 'Obriga\u00e7\u00f5es que vencem depois desta data e ainda n\u00e3o foram pagas passam a \"N\u00e3o se aplica\". Multas de infra\u00e7\u00f5es anteriores continuam sendo da Gobor. Nada \u00e9 apagado.' })\n      ]);\n      var msg = el('div');\n      abrirGaveta('Vender / baixar ' + Core.placa.formatarPlaca(v.placa), v.veiculo_id, el('div', {}, [form, msg]), [\n        el('button', { classe: 'botao', texto: 'Cancelar', onclick: fecharGaveta }),\n        el('button', { classe: 'botao perigo', texto: 'Confirmar', onclick: function () {\n          var dados = valoresDoForm(form); dados.veiculo_id = v.veiculo_id;\n          chamar('venderVeiculo', dados).then(function (r) { toast('Registrado \u00b7 ' + r.obrigacoesNaoAplica + ' obriga\u00e7\u00e3o(\u00f5es) passaram a \"N\u00e3o se aplica\"'); fecharGaveta(); telaVeiculos(); }).catch(function (e) { msg.innerHTML = ''; msg.appendChild(el('div', { classe: 'caixa erro', texto: e.message })); });\n        } })\n      ]);\n    }\n\n    // ------------------------------------------------------------ IPVA & licenciamento\n    function telaObrigacoes(exercicio) {\n      var c = conteudo();\n      c.appendChild(el('h1', { texto: '\ud83e\uddfe IPVA & Licenciamento' }));\n      var sub = el('p', { classe: 'subtitulo', texto: 'Carregando\u2026' }); c.appendChild(sub);\n      var area = el('div'); c.appendChild(area);\n      chamar('listarObrigacoes', { exercicio: exercicio }).then(function (d) {\n        estado.obr = d;\n        sub.textContent = 'Exerc\u00edcio ' + d.exercicio + ' \u00b7 ' + d.contagem.TODAS + ' obriga\u00e7\u00e3o(\u00f5es) \u00b7 hoje, ' + dataBR(d.hoje);\n        desenharObrigacoes(area);\n      }).catch(function (e) { sub.textContent = ''; mostrarErro(e.message, area); });\n    }\n    function filtrarObrigacoes() {\n      var f = estado.filtrosObr, qPlaca = Core.placa.normalizarPlaca(f.q), q = semAcento(f.q).trim();\n      return estado.obr.obrigacoes.filter(function (o) {\n        if (f.fila !== 'TODAS' && o.filas.indexOf(f.fila) < 0) return false;\n        if (f.tributo && o.tributo !== f.tributo) return false;\n        if (f.uf && o.uf !== f.uf) return false;\n        if (f.filial && o.filial !== f.filial) return false;\n        if (f.mes && String(o.vencimento || '').slice(5, 7) !== f.mes) return false;\n        if (q) {\n          var n = Core.placa.normalizarPlaca(o.placa);\n          if (!(qPlaca && n === qPlaca) && semAcento([o.placa, o.nr_lancamento_erp, o.obrigacao_id].join(' ')).indexOf(q) < 0) return false;\n        }\n        return true;\n      });\n    }\n    function desenharObrigacoes(area) {\n      area.innerHTML = '';\n      var d = estado.obr, f = estado.filtrosObr;\n      var tabelaArea = el('div');\n      function redesenhar() { desenharTabelaObrigacoes(tabelaArea); }\n      var abas = el('div', { classe: 'abas', role: 'tablist' });\n      ROTULOS.FILAS.forEach(function (fila) {\n        abas.appendChild(el('button', { classe: 'aba', role: 'tab', 'aria-selected': f.fila === fila[0] ? 'true' : 'false', onclick: function () { f.fila = fila[0]; desenharObrigacoes(area); } }, [document.createTextNode(fila[1]), el('b', { texto: String(d.contagem[fila[0]] || 0) })]));\n      });\n      function filtro(chave, controle) { controle.addEventListener('input', function () { f[chave] = controle.value; redesenhar(); }); return controle; }\n      var filiais = d.obrigacoes.map(function (o) { return o.filial; }).filter(function (x, i, a) { return x && a.indexOf(x) === i; }).sort();\n      var meses = [['', 'Todos os meses']].concat(['01', '02', '03', '04', '05', '06', '07', '08', '09', '10', '11', '12'].map(function (m) { return [m, m + '/' + d.exercicio]; }));\n      var selEx = opcoes(el('select', { 'aria-label': 'Exerc\u00edcio' }), d.exercicios.map(function (x) { return [x, 'Exerc\u00edcio ' + x]; }), d.exercicio);\n      selEx.addEventListener('change', function () { telaObrigacoes(Number(selEx.value)); });\n      area.appendChild(abas);\n      area.appendChild(el('div', { classe: 'barra' }, [\n        selEx,\n        filtro('q', el('input', { type: 'search', placeholder: 'Placa, MTO ou id', valor: f.q })),\n        filtro('tributo', opcoes(el('select'), [['', 'IPVA e licenciamento'], ['IPVA', 'IPVA'], ['LICENCIAMENTO', 'Licenciamento']], f.tributo)),\n        filtro('uf', opcoes(el('select'), [['', 'Todas as UFs']].concat(['PR', 'SP', 'SC', 'GO', 'RO']), f.uf)),\n        filtro('filial', opcoes(el('select'), [['', 'Todas as filiais']].concat(filiais), f.filial)),\n        filtro('mes', opcoes(el('select'), meses, f.mes)),\n        el('span', { classe: 'espaco' }),\n        d.podeEditar ? el('button', { classe: 'botao primario', texto: 'Colar em lote', onclick: abrirLote }) : null,\n        el('button', { classe: 'botao', texto: 'Exportar CSV', onclick: function () {\n          chamar('exportarFila', { exercicio: d.exercicio, fila: f.fila }).then(function (r) { baixar(r.nome, r.conteudo); }).catch(function (e) { toast(e.message); });\n        } })\n      ]));\n      area.appendChild(tabelaArea);\n      redesenhar();\n    }\n    function desenharTabelaObrigacoes(alvo) {\n      alvo.innerHTML = '';\n      var lista = filtrarObrigacoes();\n      var soma = function (campo) { return lista.reduce(function (s, o) { return s + (Number(o[campo]) || 0); }, 0); };\n      var semEst = lista.filter(function (o) { return o.valor_estimado === null || o.valor_estimado === undefined; }).length;\n      alvo.appendChild(el('div', { classe: 'totais' }, [\n        el('span', {}, [el('strong', { texto: String(lista.length) }), ' obriga\u00e7\u00e3o(\u00f5es)']),\n        el('span', {}, ['Estimado ', el('strong', { texto: moeda(soma('valor_estimado')) }), semEst ? ' (' + semEst + ' sem estimativa)' : '']),\n        el('span', {}, ['Devido (guias) ', el('strong', { texto: moeda(soma('valor_guia')) })]),\n        el('span', {}, ['Pago ', el('strong', { texto: moeda(soma('valor_pago')) })])\n      ]));\n      var tbody = el('tbody');\n      lista.slice(0, 600).forEach(function (o) {\n        var prazo = ROTULOS.PRAZO[o.situacao_prazo];\n        tbody.appendChild(el('tr', { classe: 'clicavel', onclick: function () { abrirObrigacao(o); } }, [\n          el('td', {}, [placa(o.placa), el('small', { texto: o.filial + ' \u00b7 ' + o.uf })]),\n          el('td', {}, [document.createTextNode(o.tributo === 'LICENCIAMENTO' ? 'Licenciamento' : 'IPVA'), el('small', { texto: Core.obrigacoes.rotuloParcela(o.parcela) })]),\n          el('td', {}, [document.createTextNode(dataBR(o.vencimento)), prazo ? el('small', {}, [selo(prazo)]) : (o.observacoes && /provis/i.test(o.observacoes) ? el('small', { texto: 'provis\u00f3rio' }) : null)]),\n          el('td', { classe: 'num', texto: moeda(o.valor_estimado) }),\n          el('td', { classe: 'num', texto: moeda(o.valor_guia) }),\n          el('td', { classe: 'num' }, [document.createTextNode(moeda(o.valor_pago)), o.data_pagamento ? el('small', { texto: dataBR(o.data_pagamento) }) : null]),\n          el('td', { texto: o.nr_lancamento_erp || '\u2014' }),\n          el('td', {}, [selo([ROTULOS.STATUS[o.status] || o.status, o.status === 'PAGO' ? 'ok' : o.status === 'PAGO_SEM_LANCAMENTO' || o.status === 'BLOQUEADO' ? 'alerta' : 'mudo'])])\n        ]));\n      });\n      alvo.appendChild(el('div', { classe: 'tabela-envoltorio' }, [el('table', {}, [\n        el('thead', {}, [el('tr', {}, ['Placa', 'Tributo', 'Vencimento', 'Estimado', 'Guia', 'Pago', 'N\u00ba MTO', 'Status'].map(function (h) { return el('th', { texto: h }); }))]),\n        tbody\n      ])]));\n      if (!lista.length) alvo.appendChild(el('p', { classe: 'mudo', texto: estado.obr.contagem.TODAS ? 'Nada nesta fila com estes filtros.' : 'Nenhuma obriga\u00e7\u00e3o neste exerc\u00edcio. Gere pelo menu \ud83d\ude9b Frota \u2192 Gerar exerc\u00edcio\u2026 na planilha.' }));\n    }\n    function abrirObrigacao(o) {\n      var editar = estado.obr.podeEditar;\n      var kv = el('dl', { classe: 'kv' });\n      [['Obriga\u00e7\u00e3o', o.obrigacao_id], ['Filial', o.filial + ' \u00b7 ' + (o.cnpj || '')], ['Vencimento', dataBR(o.vencimento)], ['Estimado', moeda(o.valor_estimado) + (o.base_estimativa ? ' \u00b7 ' + o.base_estimativa : '')],\n        ['Respons\u00e1vel', o.responsavel_pgto === 'LOCATARIO' ? 'Locat\u00e1rio (repasse ' + (o.repasse_status || '') + ')' : 'Gobor'], ['Hist\u00f3rico ERP', o.historico], ['Observa\u00e7\u00f5es', o.observacoes]\n      ].forEach(function (p) { kv.appendChild(el('div', {}, [el('dt', { texto: p[0] }), el('dd', { texto: p[1] || '\u2014' })])); });\n      var form = el('form', { classe: 'form', onsubmit: function (e) { e.preventDefault(); } });\n      var num = function (v) { return v === null || v === undefined ? '' : Core.moeda.formatarNumeroBR(v, 2); };\n      var campos = [\n        el('h3', { classe: 'inteiro', style: 'grid-column:1/-1;margin:4px 0 0;font-size:13px;color:var(--mudo)', texto: 'GUIA (VALOR DEVIDO)' }),\n        campo('Valor da guia (R$)', entrada('valor_guia', num(o.valor_guia), { inputmode: 'decimal' })), campo('Vencimento', entrada('vencimento', o.vencimento, { type: 'date' })),\n        campo('Linha digit\u00e1vel', entrada('linha_digitavel', o.linha_digitavel), null, true),\n        el('h3', { style: 'grid-column:1/-1;margin:4px 0 0;font-size:13px;color:var(--mudo)', texto: 'ERP' }),\n        campo('N\u00ba MTO', entrada('nr_lancamento_erp', o.nr_lancamento_erp, { placeholder: 'MTO 421779' })), campo('Data do lan\u00e7amento', entrada('data_lancamento_erp', o.data_lancamento_erp, { type: 'date' })),\n        el('h3', { style: 'grid-column:1/-1;margin:4px 0 0;font-size:13px;color:var(--mudo)', texto: 'PAGAMENTO (VALOR E DATA OBRIGAT\u00d3RIOS)' }),\n        campo('Valor pago (R$)', entrada('valor_pago', num(o.valor_pago), { inputmode: 'decimal' })), campo('Data do pagamento', entrada('data_pagamento', o.data_pagamento, { type: 'date' })),\n        campo('Encargos (juros + multa)', entrada('encargos', num(o.encargos), { inputmode: 'decimal' })), campo('Desconto obtido', entrada('desconto_obtido', num(o.desconto_obtido), { inputmode: 'decimal' }))\n      ];\n      if (o.tributo === 'LICENCIAMENTO') {\n        campos.push(el('h3', { style: 'grid-column:1/-1;margin:4px 0 0;font-size:13px;color:var(--mudo)', texto: 'CRLV' }));\n        campos.push(campo('CRLV emitido', opcoes(el('select', { name: 'crlv_emitido' }), [['N', 'N\u00e3o'], ['S', 'Sim']], o.crlv_emitido || 'N')));\n        campos.push(campo('Data do CRLV', entrada('data_crlv', o.data_crlv, { type: 'date' })));\n      }\n      var manuais = [['', 'Manter (calculado pelos campos)'], ['BLOQUEADO', 'Bloquear (informe o motivo)'], ['ISENTO', 'Isento'], ['NAO_APLICA', 'N\u00e3o se aplica'], ['CANCELADO', 'Cancelar']];\n      if (['ISENTO', 'NAO_APLICA', 'CANCELADO', 'BLOQUEADO'].indexOf(o.status) >= 0) manuais.push(['REABRIR', 'Reabrir']);\n      campos.push(el('h3', { style: 'grid-column:1/-1;margin:4px 0 0;font-size:13px;color:var(--mudo)', texto: 'SITUA\u00c7\u00c3O' }));\n      campos.push(campo('Status (atual: ' + (ROTULOS.STATUS[o.status] || o.status) + ')', opcoes(el('select', { name: 'status_manual' }), manuais, '')));\n      campos.push(campo('Motivo do bloqueio', entrada('bloqueio_motivo', o.bloqueio_motivo)));\n      campos.push(campo('Observa\u00e7\u00f5es', el('textarea', { name: 'observacoes', style: 'min-height:60px;font-family:inherit' }, [o.observacoes || '']), null, true));\n      campos.forEach(function (x) { form.appendChild(x); });\n      if (!editar) Array.prototype.forEach.call(form.querySelectorAll('input,select,textarea'), function (c) { c.disabled = true; });\n      var msg = el('div');\n      var corpo = el('div', {}, [el('div', { classe: 'secao' }, [kv]), form, msg]);\n      var botoes = editar ? [el('button', { classe: 'botao', texto: 'Cancelar', onclick: fecharGaveta }), el('button', { classe: 'botao primario', texto: 'Salvar', onclick: function () {\n        var dados = valoresDoForm(form), manual = dados.status_manual; delete dados.status_manual;\n        if (manual) dados.status_manual = manual;\n        var alteracoes = {}; Object.keys(dados).forEach(function (k) { if (k !== 'status_manual') alteracoes[k] = dados[k]; });\n        if (manual) alteracoes.status_manual = manual;\n        chamar('atualizarObrigacao', { obrigacao_id: o.obrigacao_id, alteracoes: alteracoes }).then(function (novo) {\n          var lista = estado.obr.obrigacoes;\n          for (var i = 0; i < lista.length; i++) if (lista[i].obrigacao_id === novo.obrigacao_id) lista[i] = Object.assign({}, lista[i], novo);\n          toast('Salvo \u00b7 ' + (ROTULOS.STATUS[novo.status] || novo.status)); fecharGaveta(); telaObrigacoes(estado.obr.exercicio);\n        }).catch(function (e) { msg.innerHTML = ''; msg.appendChild(el('div', { classe: 'caixa erro', texto: e.message })); });\n      } })] : [];\n      abrirGaveta(Core.placa.formatarPlaca(o.placa) + ' \u00b7 ' + (o.tributo === 'LICENCIAMENTO' ? 'Licenciamento' : 'IPVA') + ' ' + o.exercicio, Core.obrigacoes.rotuloParcela(o.parcela) + ' \u00b7 ' + (ROTULOS.STATUS[o.status] || o.status), corpo, botoes);\n    }\n    function abrirLote() {\n      var ajuda = {\n        GUIA: 'placa ; tributo ; parcela ; valor ; vencimento ; linha digit\u00e1vel (opcional)\\nEx.: BEU1D91;IPVA;U;1.950,00;11/01/2027',\n        MTO: 'placa ; tributo ; parcela ; n\u00ba MTO\\nEx.: BEU1D91;IPVA;U;MTO 421779',\n        PAGAMENTO: 'placa ; tributo ; parcela ; valor pago ; data ; n\u00ba MTO (opcional)\\nEx.: BEU1D91;IPVA;U;1.950,00;10/01/2027;MTO 421779'\n      };\n      var tipo = 'GUIA';\n      var dica = el('pre', { classe: 'caixa', style: 'white-space:pre-wrap;margin:0;font-size:12px', texto: ajuda.GUIA });\n      var ta = el('textarea', { placeholder: 'Cole aqui as linhas (pode copiar direto do Excel ou do Sheets). Parcela: U = cota \u00fanica, ou 1 a 5. Tributo: IPVA ou LIC.' });\n      var resultado = el('div');\n      var radios = el('div', { classe: 'opcoes', style: 'grid-auto-flow:column;justify-content:start;gap:16px' }, [['GUIA', 'Valores de guia'], ['MTO', 'N\u00ba MTO (ERP)'], ['PAGAMENTO', 'Pagamentos']].map(function (t) {\n        var r = el('input', { type: 'radio', name: 'tipoLote', value: t[0], checked: t[0] === 'GUIA', onchange: function () { tipo = t[0]; dica.textContent = ajuda[tipo]; resultado.innerHTML = ''; } });\n        return el('label', {}, [r, el('span', { texto: t[1] })]);\n      }));\n      var aplicar = el('button', { classe: 'botao primario', texto: 'Aplicar', disabled: true });\n      function previa() {\n        resultado.innerHTML = ''; carregando(resultado, 'Conferindo as linhas\u2026');\n        chamar('previaLote', { tipo: tipo, texto: ta.value, exercicio: estado.obr.exercicio }).then(function (p) {\n          resultado.innerHTML = '';\n          resultado.appendChild(el('div', { classe: 'caixa ' + (p.comErro ? 'alerta' : 'ok'), texto: p.validos + ' linha(s) v\u00e1lida(s) \u00b7 ' + p.comErro + ' com erro' + (p.comErro ? ' (ser\u00e3o ignoradas ao aplicar)' : '') }));\n          var tbody = el('tbody');\n          p.itens.forEach(function (i) {\n            tbody.appendChild(el('tr', {}, [el('td', { texto: String(i.linha) }), el('td', { texto: [i.placa, i.tributo, i.parcela].join(' \u00b7 ') }),\n              el('td', {}, [i.erro ? selo(['\u2716 ' + i.erro, 'erro']) : selo(['\u2714 ' + (ROTULOS.STATUS[i.patch.status] || i.patch.status), 'ok']), i.aviso ? el('small', { texto: i.aviso }) : null])]));\n          });\n          resultado.appendChild(el('div', { classe: 'tabela-envoltorio' }, [el('table', {}, [el('thead', {}, [el('tr', {}, ['Linha', 'Obriga\u00e7\u00e3o', 'Resultado'].map(function (h) { return el('th', { texto: h }); }))]), tbody])]));\n          aplicar.disabled = !p.validos;\n          aplicar.textContent = 'Aplicar ' + p.validos + ' linha(s)';\n        }).catch(function (e) { resultado.innerHTML = ''; resultado.appendChild(el('div', { classe: 'caixa erro', texto: e.message })); });\n      }\n      aplicar.addEventListener('click', function () {\n        aplicar.disabled = true;\n        chamar('aplicarLote', { tipo: tipo, texto: ta.value, exercicio: estado.obr.exercicio }).then(function (r) {\n          toast(r.aplicados + ' obriga\u00e7\u00e3o(\u00f5es) atualizada(s)' + (r.ignorados ? ' \u00b7 ' + r.ignorados + ' linha(s) com erro ignorada(s)' : ''));\n          fecharGaveta(); telaObrigacoes(estado.obr.exercicio);\n        }).catch(function (e) { aplicar.disabled = false; resultado.appendChild(el('div', { classe: 'caixa erro', texto: e.message })); });\n      });\n      abrirGaveta('Colar em lote', 'Exerc\u00edcio ' + estado.obr.exercicio, el('div', { style: 'display:grid;gap:12px' }, [radios, dica, el('label', { classe: 'campo' }, [ta]), resultado]), [\n        el('button', { classe: 'botao', texto: 'Cancelar', onclick: fecharGaveta }), el('button', { classe: 'botao', texto: 'Pr\u00e9-visualizar', onclick: previa }), aplicar\n      ]);\n    }\n\n    // ------------------------------------------------------------ roteamento\n    function rotear() {\n      var id = (location.hash || '#/visao-geral').replace('#/', '');\n      var t = telasPermitidas().filter(function (x) { return x.id === id; })[0] || telasPermitidas()[0];\n      montarMenu(t.id);\n      fecharGaveta();\n      document.getElementById('lateral').classList.remove('aberta');\n      if (t.id === 'visao-geral') telaVisaoGeral();\n      else if (t.id === 'admin') telaAdmin();\n      else if (t.id === 'veiculos') telaVeiculos();\n      else if (t.id === 'ipva-licenciamento') telaObrigacoes();\n      else telaEmConstrucao(t);\n      document.getElementById('conteudo').focus();\n    }\n\n    document.getElementById('menuBotao').addEventListener('click', function () {\n      var nav = document.getElementById('lateral');\n      var aberta = nav.classList.toggle('aberta');\n      this.setAttribute('aria-expanded', aberta ? 'true' : 'false');\n    });\n\n    chamar('meuPerfil').then(function (eu) {\n      estado.eu = eu; estado.perfil = eu.perfil;\n      document.getElementById('usuario').textContent = eu.email + ' \u00b7 ' + eu.perfil;\n      window.addEventListener('hashchange', rotear);\n      rotear();\n    }).catch(function (e) {\n      document.getElementById('usuario').textContent = '';\n      mostrarErro(e.message);\n    });\n  })();\n</script>\n\n</body>\n</html>\n";
 
 
 // ===== Api.js =====
@@ -2127,7 +2376,7 @@ var Rotas = (function () {
 
 function api(rota, args) {
   try {
-    var def = Rotas[rota];
+    var def = Rotas[rota] || (typeof RotasOperacao !== 'undefined' ? RotasOperacao[rota] : null);
     if (!def) throw new Error('Rota desconhecida: ' + rota);
     var ctx = Auth.exigir(def.perfis);
     return { ok: true, dados: def.fn(args || {}, ctx) };
@@ -2839,13 +3088,21 @@ function onOpen() {
     .addToUi();
 }
 
-function menuAbrirPainel() {
+function urlDoPainel_() {
   var url = '';
   try { url = Config.obter('URL_WEBAPP'); } catch (e) { url = ''; }
+  if (!url) {
+    try { url = ScriptApp.getService().getUrl() || ''; } catch (e2) { url = ''; }
+  }
+  return url;
+}
+
+function menuAbrirPainel() {
+  var url = urlDoPainel_();
   var ui = SpreadsheetApp.getUi();
   if (!url) {
     ui.alert('Painel ainda n\u00e3o implantado',
-      'Implante o Web App (Extens\u00f5es \u2192 Apps Script \u2192 Implantar \u2192 Nova implanta\u00e7\u00e3o \u2192 App da Web) e cole o endere\u00e7o na CONFIG, chave URL_WEBAPP. O passo a passo est\u00e1 em docs/runbook.md.',
+      'Publique o painel uma vez: Extens\u00f5es \u2192 Apps Script \u2192 Implantar \u2192 Nova implanta\u00e7\u00e3o \u2192 engrenagem \u2192 App da Web \u2192 Executar como: Eu \u2192 Quem pode acessar: qualquer pessoa da Gobor \u2192 Implantar. Depois volte aqui e clique em Abrir painel de novo.',
       ui.ButtonSet.OK);
     return;
   }
@@ -2879,6 +3136,312 @@ function menuSobre() {
   var ui = SpreadsheetApp.getUi();
   ui.alert('Painel de Frota Gobor', 'Vers\u00e3o ' + Core.VERSAO + '\nFuso: ' + Util.TZ + '\nDocumenta\u00e7\u00e3o: docs/ no reposit\u00f3rio.', ui.ButtonSet.OK);
 }
+
+
+// ===== Operacao.js =====
+/**
+ * Rotas de opera\u00e7\u00e3o do painel (Fase 3): ve\u00edculos e obriga\u00e7\u00f5es de IPVA/licenciamento.
+ * Todas passam por api(rota, args), que confere o perfil antes de chamar.
+ */
+var RotasOperacao = (function () {
+  var TODOS = ['ADMIN', 'FINANCEIRO', 'DP', 'CONSULTA'];
+  var EDITAM = ['ADMIN', 'FINANCEIRO'];
+
+  var CAMPOS_VEICULO_EDITAVEIS = ['placa', 'renavam', 'chassi', 'tipo', 'marca_modelo', 'ano_fabricacao', 'ano_modelo',
+    'cnpj_proprietario', 'uf_registro', 'municipio_registro', 'situacao', 'data_aquisicao', 'isento_ipva', 'motivo_isencao',
+    'forma_pgto_ipva_padrao', 'observacoes'];
+  var CAMPOS_OBRIGACAO_EDITAVEIS = ['valor_guia', 'vencimento', 'linha_digitavel', 'nr_lancamento_erp', 'data_lancamento_erp',
+    'valor_pago', 'data_pagamento', 'encargos', 'desconto_obtido', 'crlv_emitido', 'data_crlv', 'bloqueio_motivo', 'observacoes'];
+  var STATUS_MANUAIS = ['BLOQUEADO', 'ISENTO', 'NAO_APLICA', 'CANCELADO', 'REABRIR'];
+
+  function exercicio_(args) {
+    var n = Number(args && args.exercicio);
+    return n >= 2020 && n <= 2100 ? n : Exercicio.anoSugerido();
+  }
+
+  function agrupar_(lista, campo) {
+    var m = {};
+    lista.forEach(function (x) { (m[x[campo]] = m[x[campo]] || []).push(x); });
+    return m;
+  }
+
+  function locacaoVigente_(locacoes, veiculoId, data) {
+    for (var i = 0; i < locacoes.length; i++) {
+      var l = locacoes[i];
+      if (l.veiculo_id === veiculoId && l.inicio && l.inicio <= data && (!l.fim || data <= l.fim)) return l;
+    }
+    return null;
+  }
+
+  function semInterno_(r) {
+    var c = {};
+    Object.keys(r).forEach(function (k) { if (k.charAt(0) !== '_') c[k] = r[k]; });
+    return c;
+  }
+
+  function tabelasReferencia_() {
+    return {
+      calendario: Db.lerTodos('CALENDARIO_VENCIMENTOS'),
+      aliquotas: Db.lerTodos('ALIQUOTAS_IPVA'),
+      taxas: Db.lerTodos('TAXAS_LICENCIAMENTO'),
+      venais: Db.lerTodos('VALORES_VENAIS'),
+    };
+  }
+
+  // ---------------------------------------------------------------- ve\u00edculos
+  function listarVeiculos(args, ctx) {
+    var ex = exercicio_(args);
+    var hoje = Util.hojeIso();
+    var obr = agrupar_(Db.lerTodos('OBRIGACOES'), 'veiculo_id');
+    var locacoes = Db.lerTodos('LOCACOES');
+    var locatarios = Db.porChave('LOCATARIOS');
+    var filiais = Db.lerTodos('FILIAIS');
+    var veiculos = Db.lerTodos('VEICULOS').map(function (v) {
+      var l = locacaoVigente_(locacoes, v.veiculo_id, hoje);
+      var sd = Core.veiculos.situacaoDocumental(obr[v.veiculo_id] || [], ex, hoje);
+      return {
+        veiculo_id: v.veiculo_id, placa: v.placa, placa_norm: v.placa_norm, renavam: v.renavam, tipo: v.tipo,
+        categoria: v.categoria, marca_modelo: v.marca_modelo, cnpj_proprietario: v.cnpj_proprietario,
+        uf_registro: v.uf_registro, situacao: v.situacao, ipva: sd.ipva, licenciamento: sd.licenciamento,
+        locatario: l ? ((locatarios[l.locatario_id] || {}).nome || l.locatario_id) : null,
+      };
+    });
+    return {
+      exercicio: ex, hoje: hoje, veiculos: veiculos,
+      filiais: filiais.map(function (f) { return { cnpj: f.cnpj, nome_curto: f.nome_curto, uf: f.uf, ativo: f.ativo }; }),
+      podeEditar: EDITAM.indexOf(ctx.perfil) >= 0,
+      enums: { TIPO_VEICULO: Core.schema.ENUMS.TIPO_VEICULO, SITUACAO_VEICULO: Core.schema.ENUMS.SITUACAO_VEICULO, UF: Core.schema.ENUMS.UF, FORMA_PGTO_IPVA: Core.schema.ENUMS.FORMA_PGTO_IPVA },
+    };
+  }
+
+  function fichaVeiculo(args) {
+    var v = Db.porChave('VEICULOS')[args.veiculo_id];
+    if (!v) throw new Error('Ve\u00edculo n\u00e3o encontrado: ' + args.veiculo_id);
+    var hoje = Util.hojeIso();
+    var locatarios = Db.porChave('LOCATARIOS');
+    var obrigacoes = Db.lerTodos('OBRIGACOES').filter(function (o) { return o.veiculo_id === v.veiculo_id; }).map(function (o) {
+      var c = Core.obrigacoes.classificar(o, hoje);
+      var va = Core.obrigacoes.valorAtual(o);
+      return { obrigacao_id: o.obrigacao_id, exercicio: o.exercicio, tributo: o.tributo, parcela: o.parcela, vencimento: o.vencimento,
+        status: o.status, situacao_prazo: c.situacao_prazo, valor: va.valor, camada: va.camada, nr_lancamento_erp: o.nr_lancamento_erp };
+    }).sort(function (a, b) { return String(a.vencimento || '9').localeCompare(String(b.vencimento || '9')); });
+    var locacoes = Db.lerTodos('LOCACOES').filter(function (l) { return l.veiculo_id === v.veiculo_id; }).map(function (l) {
+      return { locacao_id: l.locacao_id, inicio: l.inicio, fim: l.fim, contrato_ref: l.contrato_ref,
+        locatario: (locatarios[l.locatario_id] || {}).nome || l.locatario_id, repassa_multas: l.repassa_multas };
+    }).sort(function (a, b) { return String(b.inicio).localeCompare(String(a.inicio)); });
+    return { veiculo: semInterno_(v), obrigacoes: obrigacoes, locacoes: locacoes, hoje: hoje };
+  }
+
+  function aplicarExercicioNovo_(v, acao, ex) {
+    var plano = Core.exercicio.planejarExercicio({
+      exercicio: ex, veiculos: [v], tabelas: tabelasReferencia_(), locacoes: Db.lerTodos('LOCACOES'),
+      existentes: Db.lerTodos('OBRIGACOES'), opcoes: { formaPadrao: Config.obter('FORMA_PGTO_IPVA_PADRAO') || 'COTA_UNICA' },
+    });
+    var regs = plano.novas;
+    if (acao === 'QUITADAS') {
+      regs = regs.map(function (o) {
+        var c = Object.assign({}, o);
+        c.status = 'NAO_APLICA';
+        c.observacoes = 'Exerc\u00edcio j\u00e1 quitado no emplacamento ou antes da aquisi\u00e7\u00e3o';
+        return c;
+      });
+    }
+    if (regs.length) Db.upsert('OBRIGACOES', regs, { origem: 'WEBAPP', detalhe: 'exerc\u00edcio ' + ex + ' do ve\u00edculo novo ' + v.placa });
+    return { geradas: regs.length, pendencias: plano.pendencias.map(function (p) { return p.tipo + ': ' + p.detalhe; }) };
+  }
+
+  /**
+   * Novo ve\u00edculo ou edi\u00e7\u00e3o. Se houver avisos (ex.: placa equivalente a um vendido), devolve
+   * {ok:false, avisos} para o painel pedir confirma\u00e7\u00e3o; reenviar com confirmarAvisos = true.
+   */
+  function salvarVeiculo(args) {
+    var entrada = args.veiculo || {};
+    var novo = !!args.novo;
+    var todos = Db.lerTodos('VEICULOS');
+    var v;
+    if (novo) {
+      v = {};
+      CAMPOS_VEICULO_EDITAVEIS.forEach(function (k) { if (entrada[k] !== undefined) v[k] = entrada[k]; });
+      v.veiculo_id = Core.ids.proximoId('V', todos.map(function (x) { return x.veiculo_id; }), 4);
+    } else {
+      var atual = null;
+      todos.forEach(function (x) { if (x.veiculo_id === entrada.veiculo_id) atual = x; });
+      if (!atual) throw new Error('Ve\u00edculo n\u00e3o encontrado: ' + entrada.veiculo_id);
+      v = semInterno_(atual);
+      CAMPOS_VEICULO_EDITAVEIS.forEach(function (k) { if (entrada[k] !== undefined) v[k] = entrada[k]; });
+    }
+    v = Core.tabela.normalizarRegistro(v, 'VEICULOS');
+    v = Core.veiculos.completarVeiculo(v);
+    var erros = Core.tabela.validarRegistro(v, 'VEICULOS').filter(function (e) { return !/^(criado_em|atualizado_em|atualizado_por)/.test(e); });
+    var regra = Core.veiculos.validarVeiculo(v, todos);
+    erros = erros.concat(regra.erros);
+    if (erros.length) throw new Error(erros.join('; '));
+    if (regra.avisos.length && !args.confirmarAvisos) return { ok: false, avisos: regra.avisos };
+    Db.upsert('VEICULOS', [v], { origem: 'WEBAPP', detalhe: novo ? 'novo ve\u00edculo' : 'edi\u00e7\u00e3o do cadastro' });
+    var ex = null;
+    if (novo && args.exercicioAcao && args.exercicioAcao !== 'DEPOIS') ex = aplicarExercicioNovo_(v, args.exercicioAcao, exercicio_(args));
+    return { ok: true, veiculo_id: v.veiculo_id, avisos: regra.avisos, exercicio: ex };
+  }
+
+  function transferirVeiculo(args) {
+    var v = Db.porChave('VEICULOS')[args.veiculo_id];
+    if (!v) throw new Error('Ve\u00edculo n\u00e3o encontrado');
+    var filial = Db.porChave('FILIAIS')[Core.fiscal.formatarCnpj(args.cnpj)];
+    if (!filial) throw new Error('Filial n\u00e3o encontrada: ' + args.cnpj);
+    var data = Core.datas.parseDataFlex(args.data) || Util.hojeIso();
+    var uf = args.uf || filial.uf;
+    var nota = 'Transferido de ' + (v.cnpj_proprietario || '?') + '/' + (v.uf_registro || '?') + ' para ' + filial.cnpj + '/' + uf + ' em ' + Core.datas.dataBR(data);
+    Db.atualizar('VEICULOS', v.veiculo_id, {
+      cnpj_proprietario: filial.cnpj, uf_registro: uf, municipio_registro: args.municipio || null,
+      observacoes: [v.observacoes, nota].filter(function (x) { return x; }).join('; '),
+    }, { origem: 'WEBAPP', detalhe: 'transfer\u00eancia' });
+    return { ok: true, nota: nota + '. Obriga\u00e7\u00f5es j\u00e1 geradas mant\u00eam o retrato anterior; vale a partir do pr\u00f3ximo exerc\u00edcio gerado.' };
+  }
+
+  function venderVeiculo(args) {
+    var v = Db.porChave('VEICULOS')[args.veiculo_id];
+    if (!v) throw new Error('Ve\u00edculo n\u00e3o encontrado');
+    var situacao = args.situacao === 'BAIXADO' ? 'BAIXADO' : 'VENDIDO';
+    var data = Core.datas.parseDataFlex(args.data);
+    if (!data) throw new Error('Informe a data da venda/baixa');
+    Db.atualizar('VEICULOS', v.veiculo_id, { situacao: situacao, data_venda: data }, { origem: 'WEBAPP', detalhe: situacao.toLowerCase() });
+    var obr = Db.lerTodos('OBRIGACOES').filter(function (o) { return o.veiculo_id === v.veiculo_id; });
+    var afetadas = Core.veiculos.obrigacoesAposVenda(obr, data).map(function (o) {
+      return { obrigacao_id: o.obrigacao_id, status: 'NAO_APLICA', observacoes: 'Ve\u00edculo ' + situacao.toLowerCase() + ' em ' + Core.datas.dataBR(data) };
+    });
+    if (afetadas.length) Db.upsert('OBRIGACOES', afetadas, { origem: 'WEBAPP', detalhe: 'venda/baixa ' + v.placa });
+    return { ok: true, obrigacoesNaoAplica: afetadas.length };
+  }
+
+  // ---------------------------------------------------------------- obriga\u00e7\u00f5es
+  function listarObrigacoes(args, ctx) {
+    var ex = exercicio_(args);
+    var hoje = Util.hojeIso();
+    var dias = Config.numero('DIAS_ALERTA_VENCIMENTO') || 7;
+    var veic = Db.porChave('VEICULOS');
+    var nomes = {};
+    Db.lerTodos('FILIAIS').forEach(function (f) { nomes[f.cnpj] = f.nome_curto; });
+    var todas = Db.lerTodos('OBRIGACOES');
+    var exercicios = {};
+    todas.forEach(function (o) { exercicios[o.exercicio] = true; });
+    var contagem = { TODAS: 0, A_LANCAR_ERP: 0, PAGO_SEM_LANCAMENTO: 0, VENCIDOS: 0, BLOQUEADOS: 0, SEM_ESTIMATIVA: 0 };
+    var lista = todas.filter(function (o) { return Number(o.exercicio) === ex; }).map(function (o) {
+      var c = Core.obrigacoes.classificar(o, hoje, dias);
+      contagem.TODAS++;
+      c.filas.forEach(function (f) { contagem[f]++; });
+      var v = veic[o.veiculo_id] || {};
+      var r = semInterno_(o);
+      r.situacao_prazo = c.situacao_prazo;
+      r.filas = c.filas;
+      r.tipo = v.tipo || null;
+      r.filial = nomes[o.cnpj] || o.cnpj;
+      r.historico = Core.obrigacoes.historicoErp(o);
+      return r;
+    }).sort(function (a, b) { return String(a.vencimento || '9999').localeCompare(String(b.vencimento || '9999')) || String(a.placa).localeCompare(String(b.placa)); });
+    return {
+      exercicio: ex, hoje: hoje, obrigacoes: lista, contagem: contagem,
+      exercicios: Object.keys(exercicios).map(Number).concat([ex]).filter(function (x, i, a) { return a.indexOf(x) === i; }).sort(),
+      podeEditar: EDITAM.indexOf(ctx.perfil) >= 0,
+    };
+  }
+
+  function atualizarObrigacao(args) {
+    var atual = Db.porChave('OBRIGACOES')[args.obrigacao_id];
+    if (!atual) throw new Error('Obriga\u00e7\u00e3o n\u00e3o encontrada: ' + args.obrigacao_id);
+    var alt = args.alteracoes || {};
+    var depois = semInterno_(atual);
+    CAMPOS_OBRIGACAO_EDITAVEIS.forEach(function (k) {
+      if (alt[k] === undefined) return;
+      var val = alt[k] === '' ? null : alt[k];
+      if (val !== null && /^(valor_|encargos|desconto_)/.test(k)) val = Core.moeda.parseMoeda(val);
+      if (val !== null && /^(vencimento|data_)/.test(k)) {
+        var d = Core.datas.parseDataFlex(val);
+        if (!d) throw new Error(k + ': data inv\u00e1lida (' + val + ')');
+        val = d;
+      }
+      if (val !== null && k === 'nr_lancamento_erp') {
+        var m = Core.obrigacoes.normalizarMto(val);
+        if (!m) throw new Error('N\u00ba MTO inv\u00e1lido: ' + val);
+        val = m;
+      }
+      depois[k] = val;
+    });
+    if (depois.nr_lancamento_erp && !depois.data_lancamento_erp) depois.data_lancamento_erp = Util.hojeIso();
+    if (depois.data_pagamento && depois.data_pagamento > Util.hojeIso()) throw new Error('Data de pagamento no futuro');
+    var manual = alt.status_manual;
+    if (manual) {
+      if (STATUS_MANUAIS.indexOf(manual) < 0) throw new Error('Status inv\u00e1lido: ' + manual);
+      var alvo = manual === 'REABRIR' ? Core.obrigacoes.statusCalculado(Object.assign({}, depois, { status: 'PREVISTO' })) : manual;
+      if (!Core.obrigacoes.transicaoPermitida(atual.status, alvo)) throw new Error('N\u00e3o \u00e9 poss\u00edvel passar de ' + atual.status + ' para ' + alvo);
+      depois.status = alvo;
+    } else {
+      depois.status = Core.obrigacoes.statusCalculado(depois);
+      if (depois.status !== atual.status && !Core.obrigacoes.transicaoPermitida(atual.status, depois.status)) {
+        throw new Error('N\u00e3o \u00e9 poss\u00edvel passar de ' + atual.status + ' para ' + depois.status);
+      }
+    }
+    var erros = Core.obrigacoes.validarObrigacao(depois);
+    if (erros.length) throw new Error(erros.join('; '));
+    Db.upsert('OBRIGACOES', [depois], { origem: 'WEBAPP', detalhe: manual ? 'status ' + manual : 'edi\u00e7\u00e3o' });
+    var c = Core.obrigacoes.classificar(depois, Util.hojeIso());
+    depois.situacao_prazo = c.situacao_prazo;
+    depois.filas = c.filas;
+    return depois;
+  }
+
+  function previa_(args) {
+    var ex = exercicio_(args);
+    return Core.lote.previaLote({ tipo: args.tipo, texto: args.texto, exercicio: ex, obrigacoes: Db.lerTodos('OBRIGACOES'),
+      veiculos: Db.lerTodos('VEICULOS'), hoje: Util.hojeIso() });
+  }
+
+  function previaLote(args) {
+    return previa_(args);
+  }
+
+  function aplicarLote(args) {
+    var p = previa_(args);
+    var regs = p.itens.filter(function (i) { return !i.erro; }).map(function (i) {
+      return Object.assign({ obrigacao_id: i.obrigacao_id }, i.patch);
+    });
+    if (!regs.length) throw new Error('Nenhuma linha v\u00e1lida para aplicar.');
+    var r = Db.upsert('OBRIGACOES', regs, { origem: 'WEBAPP', detalhe: 'lote ' + args.tipo });
+    return { aplicados: r.atualizados + r.inseridos, semMudanca: r.inalterados, ignorados: p.comErro };
+  }
+
+  function exportarFila(args) {
+    var dados = listarObrigacoes(args, { perfil: 'CONSULTA' });
+    var fila = args.fila || 'TODAS';
+    var lista = dados.obrigacoes.filter(function (o) { return fila === 'TODAS' || o.filas.indexOf(fila) >= 0; });
+    if (fila === 'A_LANCAR_ERP') {
+      return { nome: 'a-lancar-erp-' + dados.exercicio + '.csv', conteudo: Core.obrigacoes.csvLancamentoErp(lista) };
+    }
+    var cab = ['obrigacao_id', 'placa', 'tributo', 'parcela', 'vencimento', 'situacao_prazo', 'valor_estimado', 'valor_guia', 'valor_pago', 'data_pagamento', 'nr_lancamento_erp', 'status', 'filial'];
+    var linhas = lista.map(function (o) {
+      return cab.map(function (k) {
+        var v = o[k];
+        if (v === null || v === undefined) return '';
+        if (typeof v === 'number') return String(v).replace('.', ',');
+        var s = String(v);
+        return /[;"\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+      }).join(';');
+    });
+    return { nome: 'obrigacoes-' + dados.exercicio + '-' + fila.toLowerCase() + '.csv', conteudo: [cab.join(';')].concat(linhas).join('\n') + '\n' };
+  }
+
+  return {
+    listarVeiculos: { perfis: TODOS, fn: listarVeiculos },
+    fichaVeiculo: { perfis: TODOS, fn: fichaVeiculo },
+    salvarVeiculo: { perfis: EDITAM, fn: salvarVeiculo },
+    transferirVeiculo: { perfis: EDITAM, fn: transferirVeiculo },
+    venderVeiculo: { perfis: EDITAM, fn: venderVeiculo },
+    listarObrigacoes: { perfis: TODOS, fn: listarObrigacoes },
+    atualizarObrigacao: { perfis: EDITAM, fn: atualizarObrigacao },
+    previaLote: { perfis: EDITAM, fn: previaLote },
+    aplicarLote: { perfis: EDITAM, fn: aplicarLote },
+    exportarFila: { perfis: TODOS, fn: exportarFila },
+  };
+})();
 
 
 // ===== Setup.js =====
@@ -3373,10 +3936,9 @@ var Util = (function () {
  * qualquer pessoa do dom\u00ednio". O perfil de cada visitante vem de Auth (aba USUARIOS).
  */
 function doGet() {
-  // PAINEL_HTML vem de 01_painel.js (gerado no build a partir de apps-script/ui/).
-  var t = HtmlService.createTemplate(PAINEL_HTML);
-  t.versao = Core.VERSAO;
-  return t.evaluate()
+  // PAINEL_HTML vem de 01_painel.js (gerado no build a partir de apps-script/ui/), j\u00e1 pronto:
+  // sem motor de template, para nenhum trecho de c\u00f3digo ser interpretado como scriptlet.
+  return HtmlService.createHtmlOutput(PAINEL_HTML)
     .setTitle('Frota Gobor')
     .addMetaTag('viewport', 'width=device-width, initial-scale=1')
     .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.DEFAULT);

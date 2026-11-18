@@ -84,3 +84,37 @@ export function validarVeiculo(v, outros = []) {
 export function completarVeiculo(v) {
   return { ...v, placa_norm: normalizarPlaca(v.placa), categoria: categoriaDoTipo(v.tipo) };
 }
+
+/**
+ * Situação documental do veículo num exercício (prompt §5.6), para os selos da lista.
+ * IPVA: NAO_TRIBUTADO | ISENTO | QUITADO | EM_DIA | VENCIDO | NAO_GERADO
+ * Licenciamento: LICENCIADO | QUITADO_SEM_CRLV | EM_DIA | VENCIDO | NAO_GERADO
+ */
+export function situacaoDocumental(obrigacoesDoVeiculo, exercicio, hoje) {
+  const doAno = obrigacoesDoVeiculo.filter((o) => Number(o.exercicio) === Number(exercicio) && !['CANCELADO'].includes(o.status));
+  const quitada = (o) => ['PAGO', 'PAGO_SEM_LANCAMENTO', 'ISENTO', 'NAO_APLICA'].includes(o.status);
+  const vencida = (o) => !quitada(o) && o.vencimento && o.vencimento < hoje;
+  const ipva = doAno.filter((o) => o.tributo === 'IPVA');
+  const lic = doAno.filter((o) => o.tributo === 'LICENCIAMENTO');
+  let sIpva = 'NAO_GERADO';
+  if (ipva.length) {
+    if (ipva.every((o) => o.status === 'ISENTO')) sIpva = 'ISENTO';
+    else if (ipva.every(quitada)) sIpva = 'QUITADO';
+    else if (ipva.some(vencida)) sIpva = 'VENCIDO';
+    else sIpva = 'EM_DIA';
+  }
+  let sLic = 'NAO_GERADO';
+  if (lic.length) {
+    const l = lic[0];
+    if (quitada(l)) sLic = l.crlv_emitido === 'S' || l.status === 'NAO_APLICA' ? 'LICENCIADO' : 'QUITADO_SEM_CRLV';
+    else sLic = vencida(l) ? 'VENCIDO' : 'EM_DIA';
+  }
+  return { ipva: sIpva, licenciamento: sLic };
+}
+
+/** Obrigações que viram NAO_APLICA quando o veículo é vendido/baixado em `data`. */
+export function obrigacoesAposVenda(obrigacoesDoVeiculo, data) {
+  return obrigacoesDoVeiculo.filter((o) => o.vencimento && o.vencimento > data
+    && !['PAGO', 'PAGO_SEM_LANCAMENTO', 'LANCADO_ERP', 'CANCELADO', 'NAO_APLICA', 'ISENTO'].includes(o.status)
+    && !(Number(o.valor_pago) > 0));
+}

@@ -18,7 +18,13 @@ Tudo pelo navegador. O sistema inteiro está num único arquivo, `dist/Frota.gs`
 5. **Importar.** Clique em **🚛 Frota → Admin → Importar CSVs da pasta 📤 Importação…**. Confira o resumo (212 veículos, 34 locatários, 85 locações, 9 filiais e as tabelas de 2027) e clique em **Sim**.
 6. **Gerar o exercício.** Clique em **🚛 Frota → Gerar exercício…**, aperte Enter para 2027, confira e clique em **Sim**.
 
-**Para atualizar para uma versão nova:** repita os passos 1 a 3 com o documento novo. Os dados da planilha não são afetados. Em seguida, rode Criar/validar base de novo.
+7. **Publicar o painel (uma vez).** No editor do Apps Script, clique em **Implantar → Nova implantação**.
+   - Na engrenagem ao lado de "Selecionar tipo", escolha **App da Web**.
+   - Preencha: Executar como **Eu**; Quem pode acessar **qualquer pessoa da Gobor (gobor.com.br)**. Clique em **Implantar**.
+   - Na planilha, **🚛 Frota → Abrir painel** já encontra o endereço sozinho.
+   - Para outras pessoas usarem, copie o URL que termina em `/exec` para a CONFIG (`URL_WEBAPP`) e cadastre cada e-mail na aba USUARIOS.
+
+**Para atualizar para uma versão nova:** repita os passos 1 a 3 com o documento novo. Quem usa o URL `/exec` também precisa de **Implantar → Gerenciar implantações → ✏️ → Versão: Nova versão → Implantar**; o endereço continua o mesmo. Os dados da planilha não são afetados. Em seguida, rode Criar/validar base de novo.
 
 O caminho com terminal (`clasp`), abaixo, fica para quem desenvolve.
 

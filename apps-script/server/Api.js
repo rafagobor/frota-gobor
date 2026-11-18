@@ -40,7 +40,7 @@ var Rotas = (function () {
 
 function api(rota, args) {
   try {
-    var def = Rotas[rota];
+    var def = Rotas[rota] || (typeof RotasOperacao !== 'undefined' ? RotasOperacao[rota] : null);
     if (!def) throw new Error('Rota desconhecida: ' + rota);
     var ctx = Auth.exigir(def.perfis);
     return { ok: true, dados: def.fn(args || {}, ctx) };

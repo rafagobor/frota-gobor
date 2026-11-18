@@ -19,13 +19,21 @@ function onOpen() {
     .addToUi();
 }
 
-function menuAbrirPainel() {
+function urlDoPainel_() {
   var url = '';
   try { url = Config.obter('URL_WEBAPP'); } catch (e) { url = ''; }
+  if (!url) {
+    try { url = ScriptApp.getService().getUrl() || ''; } catch (e2) { url = ''; }
+  }
+  return url;
+}
+
+function menuAbrirPainel() {
+  var url = urlDoPainel_();
   var ui = SpreadsheetApp.getUi();
   if (!url) {
     ui.alert('Painel ainda não implantado',
-      'Implante o Web App (Extensões → Apps Script → Implantar → Nova implantação → App da Web) e cole o endereço na CONFIG, chave URL_WEBAPP. O passo a passo está em docs/runbook.md.',
+      'Publique o painel uma vez: Extensões → Apps Script → Implantar → Nova implantação → engrenagem → App da Web → Executar como: Eu → Quem pode acessar: qualquer pessoa da Gobor → Implantar. Depois volte aqui e clique em Abrir painel de novo.',
       ui.ButtonSet.OK);
     return;
   }

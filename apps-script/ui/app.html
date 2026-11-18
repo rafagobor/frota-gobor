@@ -6,30 +6,43 @@
     var TELAS = [
       { id: 'visao-geral', titulo: '🏠 Visão Geral', fase: '4', perfis: [] },
       { id: 'agenda', titulo: '📅 Agenda', fase: '4', perfis: [] },
-      { id: 'ipva-licenciamento', titulo: '🧾 IPVA & Licenciamento', fase: '3', perfis: [] },
+      { id: 'ipva-licenciamento', titulo: '🧾 IPVA & Licenciamento', fase: '3', perfis: [], pronta: true },
       { id: 'multas', titulo: '🚨 Multas', fase: '5', perfis: [] },
       { id: 'motoristas', titulo: '👷 Motoristas', fase: '6', perfis: ['ADMIN', 'FINANCEIRO', 'DP'] },
       { id: 'folha', titulo: '💼 Folha do mês', fase: '6', perfis: ['ADMIN', 'FINANCEIRO', 'DP'] },
-      { id: 'veiculos', titulo: '🚛 Veículos', fase: '3', perfis: [] },
+      { id: 'veiculos', titulo: '🚛 Veículos', fase: '3', perfis: [], pronta: true },
       { id: 'locatarios', titulo: '🤝 Locatários & Repasses', fase: '8', perfis: [] },
       { id: 'custos', titulo: '📊 Custos & Gerencial', fase: '4', perfis: [] },
       { id: 'revisao', titulo: '📥 Fila de Revisão', fase: '5', perfis: ['ADMIN', 'FINANCEIRO'] },
-      { id: 'admin', titulo: '⚙️ Admin', fase: '1', perfis: ['ADMIN'] }
+      { id: 'admin', titulo: '⚙️ Admin', fase: '1', perfis: ['ADMIN'], pronta: true }
     ];
 
-    var estado = { perfil: null, eu: null };
+    var ROTULOS = {
+      STATUS: { PREVISTO: 'Previsto', GUIA_DISPONIVEL: 'Guia disponível', LANCADO_ERP: 'Lançado no ERP', PAGO: 'Pago', PAGO_SEM_LANCAMENTO: 'Pago sem lançamento', ISENTO: 'Isento', NAO_APLICA: 'Não se aplica', CANCELADO: 'Cancelado', BLOQUEADO: 'Bloqueado' },
+      PRAZO: { VENCIDO: ['Vencido', 'erro'], VENCE_HOJE: ['Vence hoje', 'erro'], VENCE_EM_7_DIAS: ['Vence em breve', 'alerta'], EM_DIA: ['Em dia', 'mudo'] },
+      IPVA: { QUITADO: ['IPVA quitado', 'ok'], EM_DIA: ['IPVA em dia', 'info'], VENCIDO: ['IPVA vencido', 'erro'], ISENTO: ['Isento', 'mudo'], NAO_GERADO: ['Sem IPVA', 'mudo'] },
+      LIC: { LICENCIADO: ['Licenciado', 'ok'], QUITADO_SEM_CRLV: ['Pago, falta CRLV', 'alerta'], EM_DIA: ['A licenciar', 'info'], VENCIDO: ['Licenc. vencido', 'erro'], NAO_GERADO: ['Não gerado', 'mudo'] },
+      FILAS: [['TODAS', 'Todas'], ['A_LANCAR_ERP', 'A lançar no ERP'], ['PAGO_SEM_LANCAMENTO', 'Pagos sem lançamento'], ['VENCIDOS', 'Vencidos'], ['BLOQUEADOS', 'Bloqueados'], ['SEM_ESTIMATIVA', 'Sem estimativa']],
+      SITUACAO: { OPERACAO_PROPRIA: 'Operação própria', LOCADO_TERCEIRO: 'Locado', PARADO: 'Parado', A_VENDA: 'À venda', VENDIDO: 'Vendido', BAIXADO: 'Baixado', EM_TRANSFERENCIA: 'Em transferência', HISTORICO: 'Histórico' }
+    };
 
+    var estado = { perfil: null, eu: null, veic: null, obr: null, filtrosVeic: { q: '', uf: '', filial: '', tipo: '', situacao: '', alerta: '' }, filtrosObr: { fila: 'TODAS', q: '', tributo: '', uf: '', filial: '', mes: '' } };
+
+    // ------------------------------------------------------------ utilidades
     function el(tag, atributos, filhos) {
       var e = document.createElement(tag);
       Object.keys(atributos || {}).forEach(function (k) {
-        if (k === 'texto') e.textContent = atributos[k];
-        else if (k === 'classe') e.className = atributos[k];
-        else e.setAttribute(k, atributos[k]);
+        var v = atributos[k];
+        if (v === null || v === undefined || v === false) return;
+        if (k === 'texto') e.textContent = v;
+        else if (k === 'classe') e.className = v;
+        else if (k.indexOf('on') === 0 && typeof v === 'function') e.addEventListener(k.slice(2), v);
+        else if (k === 'valor') e.value = v;
+        else e.setAttribute(k, v === true ? '' : v);
       });
-      (filhos || []).forEach(function (f) { if (f) e.appendChild(typeof f === 'string' ? document.createTextNode(f) : f); });
+      (filhos || []).forEach(function (f) { if (f !== null && f !== undefined && f !== false) e.appendChild(typeof f === 'string' ? document.createTextNode(f) : f); });
       return e;
     }
-
     function chamar(rota, args) {
       return new Promise(function (resolve, reject) {
         google.script.run
@@ -38,95 +51,532 @@
           .api(rota, args || {});
       });
     }
-
-    function numeroBR(n) {
-      return n === null || n === undefined ? '—' : Number(n).toLocaleString('pt-BR');
+    function numeroBR(n) { return n === null || n === undefined ? '—' : Number(n).toLocaleString('pt-BR'); }
+    function moeda(n) { return n === null || n === undefined || n === '' ? '—' : Core.moeda.formatarMoeda(n); }
+    function dataBR(iso) { return iso ? Core.datas.dataBR(String(iso).slice(0, 10)) : '—'; }
+    function selo(par) { return el('span', { classe: 'selo ' + par[1], texto: par[0] }); }
+    function placa(p) { return el('span', { classe: 'placa', texto: Core.placa.formatarPlaca(p) }); }
+    function podeEditar() { return estado.perfil === 'ADMIN' || estado.perfil === 'FINANCEIRO'; }
+    function toast(msg) {
+      var t = document.getElementById('toast');
+      t.textContent = msg; t.hidden = false;
+      clearTimeout(toast._t); toast._t = setTimeout(function () { t.hidden = true; }, 4000);
+    }
+    function conteudo() { var c = document.getElementById('conteudo'); c.innerHTML = ''; return c; }
+    function mostrarErro(mensagem, alvo) {
+      var c = alvo || conteudo();
+      c.appendChild(el('div', { classe: 'erro-caixa' }, [el('strong', { texto: 'Não foi possível concluir. ' }), document.createTextNode(mensagem)]));
+    }
+    function carregando(c, txt) { c.appendChild(el('p', { classe: 'mudo', texto: txt || 'Carregando…' })); }
+    function opcoes(select, lista, atual) {
+      lista.forEach(function (o) {
+        var valor = Array.isArray(o) ? o[0] : o, rotulo = Array.isArray(o) ? o[1] : o;
+        var op = el('option', { value: valor, texto: rotulo });
+        if (String(valor) === String(atual || '')) op.selected = true;
+        select.appendChild(op);
+      });
+      return select;
+    }
+    function semAcento(s) { return String(s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, ''); }
+    function baixar(nome, texto) {
+      try {
+        var blob = new Blob(['﻿' + texto], { type: 'text/csv;charset=utf-8' });
+        var a = el('a', { href: URL.createObjectURL(blob), download: nome });
+        document.body.appendChild(a); a.click(); a.remove();
+        toast('Arquivo ' + nome + ' gerado');
+      } catch (e) {
+        var ta = el('textarea', { readonly: true, style: 'width:100%;min-height:300px' }); ta.value = texto;
+        abrirGaveta('Copie o CSV', nome, el('div', {}, [el('p', { classe: 'mudo', texto: 'O navegador não permitiu baixar. Copie o conteúdo abaixo.' }), ta]), []);
+      }
     }
 
-    function dataBR(iso) {
-      return iso ? iso.split('-').reverse().join('/') : '';
+    // ------------------------------------------------------------ gaveta
+    function abrirGaveta(titulo, subtitulo, corpo, botoes) {
+      var g = document.getElementById('gaveta'), p = document.getElementById('painelGaveta');
+      p.innerHTML = '';
+      p.appendChild(el('div', { classe: 'gaveta-topo' }, [
+        el('div', {}, [el('h2', { texto: titulo }), subtitulo ? el('div', { classe: 'mudo', texto: subtitulo }) : null]),
+        el('button', { classe: 'fechar', 'aria-label': 'Fechar', texto: '×', onclick: fecharGaveta })
+      ]));
+      p.appendChild(el('div', { classe: 'gaveta-corpo' }, [corpo]));
+      if (botoes && botoes.length) p.appendChild(el('div', { classe: 'gaveta-rodape' }, botoes));
+      g.hidden = false; p.focus();
+    }
+    function fecharGaveta() { document.getElementById('gaveta').hidden = true; }
+    document.getElementById('gaveta').addEventListener('click', function (e) { if (e.target.getAttribute('data-fechar')) fecharGaveta(); });
+    document.addEventListener('keydown', function (e) { if (e.key === 'Escape') fecharGaveta(); });
+
+    function campo(rotulo, controle, dica, inteiro) {
+      return el('label', { classe: 'campo' + (inteiro ? ' inteiro' : '') }, [el('span', { texto: rotulo }), controle, dica || null]);
+    }
+    function entrada(nome, valor, extra) { return el('input', Object.assign({ name: nome, valor: valor === null || valor === undefined ? '' : String(valor) }, extra || {})); }
+    function valoresDoForm(form) {
+      var r = {};
+      Array.prototype.forEach.call(form.querySelectorAll('[name]'), function (c) {
+        if (c.type === 'radio') { if (c.checked) r[c.name] = c.value; return; }
+        if (c.type === 'checkbox') { r[c.name] = c.checked ? 'S' : 'N'; return; }
+        r[c.name] = c.value;
+      });
+      return r;
     }
 
-    function telasPermitidas() {
-      return TELAS.filter(function (t) { return !t.perfis.length || t.perfis.indexOf(estado.perfil) >= 0; });
-    }
-
+    // ------------------------------------------------------------ menu e rotas
+    function telasPermitidas() { return TELAS.filter(function (t) { return !t.perfis.length || t.perfis.indexOf(estado.perfil) >= 0; }); }
     function montarMenu(atual) {
-      var nav = document.getElementById('lateral');
-      nav.innerHTML = '';
+      var nav = document.getElementById('lateral'); nav.innerHTML = '';
       telasPermitidas().forEach(function (t) {
-        var a = el('a', { href: '#/' + t.id }, [el('span', { texto: t.titulo }), el('span', { classe: 'fase', texto: 'F' + t.fase })]);
+        var a = el('a', { href: '#/' + t.id }, [el('span', { texto: t.titulo }), t.pronta ? null : el('span', { classe: 'fase', texto: 'F' + t.fase })]);
         if (t.id === atual) a.setAttribute('aria-current', 'page');
         nav.appendChild(a);
       });
     }
-
-    function conteudo() {
-      var c = document.getElementById('conteudo');
-      c.innerHTML = '';
-      return c;
-    }
-
-    function mostrarErro(mensagem) {
-      var c = conteudo();
-      c.appendChild(el('div', { classe: 'erro-caixa' }, [el('strong', { texto: 'Não foi possível carregar. ' }), document.createTextNode(mensagem)]));
-    }
-
     function telaEmConstrucao(t) {
       var c = conteudo();
       c.appendChild(el('h1', { texto: t.titulo }));
       c.appendChild(el('p', { classe: 'subtitulo', texto: 'Esta tela chega na Fase ' + t.fase + ' do projeto.' }));
     }
 
-    function telaAdmin() {
-      var c = conteudo();
-      c.appendChild(el('h1', { texto: '⚙️ Admin' }));
-      c.appendChild(el('p', { classe: 'subtitulo', texto: 'Estado das tabelas da base. Cadastros, importadores e o assistente de exercício chegam nas próximas fases.' }));
-      var caixa = el('div', { classe: 'tabela-envoltorio' }, [el('p', { classe: 'mudo', texto: ' Carregando…' })]);
-      c.appendChild(caixa);
-      chamar('statusBase').then(function (d) {
-        var tbody = el('tbody');
-        d.tabelas.forEach(function (t) {
-          var selo = t.erro ? el('span', { classe: 'selo erro', texto: '✖ ' + t.erro }) : el('span', { classe: 'selo ok', texto: '✔ ok' });
-          tbody.appendChild(el('tr', {}, [
-            el('td', {}, [el('strong', { texto: t.nome }), el('div', { classe: 'mudo', texto: t.descricao })]),
-            el('td', { texto: t.planilha === 'MOTORISTAS' ? '🔒 Restrita' : 'Base' }),
-            el('td', { classe: 'num', texto: numeroBR(t.registros) }),
-            el('td', {}, [selo])
-          ]));
-        });
-        var tabela = el('table', {}, [
-          el('thead', {}, [el('tr', {}, [el('th', { texto: 'Tabela' }), el('th', { texto: 'Planilha' }), el('th', { texto: 'Registros' }), el('th', { texto: 'Situação' })])]),
-          tbody
-        ]);
-        caixa.innerHTML = '';
-        caixa.appendChild(tabela);
-      }).catch(function (e) { mostrarErro(e.message); });
-    }
-
+    // ------------------------------------------------------------ visão geral e admin
     function telaVisaoGeral() {
       var c = conteudo();
       c.appendChild(el('h1', { texto: '🏠 Visão Geral' }));
-      c.appendChild(el('p', { classe: 'subtitulo', texto: 'Hoje é ' + dataBR(estado.eu.hoje) + '. Os indicadores chegam na Fase 4.' }));
-      c.appendChild(el('div', { classe: 'aviso', texto: 'Fase 1 (fundação): a base está criada e o acesso por perfil funciona. A carga dos 212 veículos vem na Fase 2.' }));
-      var grade = el('div', { classe: 'grade' });
-      c.appendChild(grade);
+      c.appendChild(el('p', { classe: 'subtitulo', texto: 'Hoje é ' + dataBR(estado.eu.hoje) + '. Os indicadores completos chegam na Fase 4.' }));
+      var grade = el('div', { classe: 'grade' }); c.appendChild(grade);
       chamar('statusBase').then(function (d) {
-        var mapa = {};
-        d.tabelas.forEach(function (t) { mapa[t.nome] = t.registros; });
-        [['Veículos', 'VEICULOS'], ['Obrigações', 'OBRIGACOES'], ['Multas', 'MULTAS'], ['Filiais', 'FILIAIS']].forEach(function (p) {
-          grade.appendChild(el('div', { classe: 'cartao' }, [el('div', { classe: 'rotulo', texto: p[0] }), el('div', { classe: 'valor', texto: numeroBR(mapa[p[1]]) })]));
+        var mapa = {}; d.tabelas.forEach(function (t) { mapa[t.nome] = t.registros; });
+        [['Veículos', 'VEICULOS', '#/veiculos'], ['Obrigações', 'OBRIGACOES', '#/ipva-licenciamento'], ['Locações', 'LOCACOES', null], ['Filiais', 'FILIAIS', null]].forEach(function (p) {
+          var cartao = el('div', { classe: 'cartao' }, [el('div', { classe: 'rotulo', texto: p[0] }), el('div', { classe: 'valor', texto: numeroBR(mapa[p[1]]) })]);
+          grade.appendChild(p[2] ? el('a', { href: p[2], style: 'text-decoration:none;color:inherit' }, [cartao]) : cartao);
         });
       }).catch(function (e) { mostrarErro(e.message); });
     }
+    function telaAdmin() {
+      var c = conteudo();
+      c.appendChild(el('h1', { texto: '⚙️ Admin' }));
+      c.appendChild(el('p', { classe: 'subtitulo', texto: 'Estado das tabelas da base.' }));
+      var caixa = el('div', { classe: 'tabela-envoltorio' }); carregando(caixa); c.appendChild(caixa);
+      chamar('statusBase').then(function (d) {
+        var tbody = el('tbody');
+        d.tabelas.forEach(function (t) {
+          tbody.appendChild(el('tr', {}, [
+            el('td', {}, [el('strong', { texto: t.nome }), el('small', { texto: t.descricao })]),
+            el('td', { texto: t.planilha === 'MOTORISTAS' ? '🔒 Restrita' : 'Base' }),
+            el('td', { classe: 'num', texto: numeroBR(t.registros) }),
+            el('td', {}, [t.erro ? selo(['✖ ' + t.erro, 'erro']) : selo(['✔ ok', 'ok'])])
+          ]));
+        });
+        caixa.innerHTML = '';
+        caixa.appendChild(el('table', {}, [el('thead', {}, [el('tr', {}, ['Tabela', 'Planilha', 'Registros', 'Situação'].map(function (h) { return el('th', { texto: h }); }))]), tbody]));
+      }).catch(function (e) { caixa.innerHTML = ''; mostrarErro(e.message, caixa); });
+    }
 
+    // ------------------------------------------------------------ veículos
+    function nomeFilial(cnpj) {
+      var f = (estado.veic.filiais || []).filter(function (x) { return x.cnpj === cnpj; })[0];
+      return f ? f.nome_curto : (cnpj || '—');
+    }
+    function seloIpva(v) {
+      if (v.ipva === 'NAO_GERADO' && v.categoria === 'IMPLEMENTO') return selo(['Não tributado', 'mudo']);
+      return selo(ROTULOS.IPVA[v.ipva] || [v.ipva, 'mudo']);
+    }
+    function filtrarVeiculos() {
+      var f = estado.filtrosVeic, q = semAcento(f.q).trim(), qPlaca = Core.placa.normalizarPlaca(f.q);
+      return estado.veic.veiculos.filter(function (v) {
+        if (f.uf && v.uf_registro !== f.uf) return false;
+        if (f.filial && v.cnpj_proprietario !== f.filial) return false;
+        if (f.tipo && v.tipo !== f.tipo) return false;
+        if (f.situacao && v.situacao !== f.situacao) return false;
+        if (f.alerta === 'IPVA_VENCIDO' && v.ipva !== 'VENCIDO') return false;
+        if (f.alerta === 'LIC_VENCIDO' && v.licenciamento !== 'VENCIDO') return false;
+        if (f.alerta === 'LOCADOS' && v.situacao !== 'LOCADO_TERCEIRO') return false;
+        if (q) {
+          var alvo = semAcento([v.placa, v.renavam, v.marca_modelo, v.locatario, v.veiculo_id].join(' '));
+          if (!(qPlaca && v.placa_norm === qPlaca) && alvo.indexOf(q) < 0) return false;
+        }
+        return true;
+      });
+    }
+    function telaVeiculos() {
+      var c = conteudo();
+      c.appendChild(el('h1', { texto: '🚛 Veículos' }));
+      var sub = el('p', { classe: 'subtitulo', texto: 'Carregando…' }); c.appendChild(sub);
+      var area = el('div'); c.appendChild(area);
+      chamar('listarVeiculos').then(function (d) {
+        estado.veic = d;
+        sub.textContent = d.veiculos.length + ' veículos · situação documental do exercício ' + d.exercicio + ' (hoje, ' + dataBR(d.hoje) + ')';
+        desenharVeiculos(area);
+      }).catch(function (e) { sub.textContent = ''; mostrarErro(e.message, area); });
+    }
+    function desenharVeiculos(area) {
+      area.innerHTML = '';
+      var f = estado.filtrosVeic, d = estado.veic;
+      var tabelaArea = el('div');
+      function redesenhar() { desenharTabelaVeiculos(tabelaArea); }
+      function filtro(chave, controle) { controle.addEventListener('input', function () { f[chave] = controle.value; redesenhar(); }); return controle; }
+      var barra = el('div', { classe: 'barra' }, [
+        filtro('q', el('input', { type: 'search', placeholder: 'Placa (qualquer formato), RENAVAM, modelo, locatário', valor: f.q })),
+        filtro('uf', opcoes(el('select'), [['', 'Todas as UFs']].concat(['PR', 'SP', 'SC', 'GO', 'RO', 'MT']), f.uf)),
+        filtro('filial', opcoes(el('select'), [['', 'Todas as filiais']].concat(d.filiais.map(function (x) { return [x.cnpj, x.nome_curto]; })), f.filial)),
+        filtro('tipo', opcoes(el('select'), [['', 'Todos os tipos']].concat(d.enums.TIPO_VEICULO), f.tipo)),
+        filtro('situacao', opcoes(el('select'), [['', 'Todas as situações']].concat(d.enums.SITUACAO_VEICULO.map(function (s) { return [s, ROTULOS.SITUACAO[s] || s]; })), f.situacao)),
+        filtro('alerta', opcoes(el('select'), [['', 'Sem filtro de alerta'], ['IPVA_VENCIDO', 'IPVA vencido'], ['LIC_VENCIDO', 'Licenciamento vencido'], ['LOCADOS', 'Só locados']], f.alerta)),
+        el('span', { classe: 'espaco' }),
+        d.podeEditar ? el('button', { classe: 'botao primario', texto: '+ Novo veículo', onclick: function () { abrirFormVeiculo(null); } }) : null
+      ]);
+      area.appendChild(barra);
+      area.appendChild(tabelaArea);
+      redesenhar();
+    }
+    function desenharTabelaVeiculos(alvo) {
+      alvo.innerHTML = '';
+      var lista = filtrarVeiculos();
+      alvo.appendChild(el('div', { classe: 'totais' }, [el('span', {}, [el('strong', { texto: String(lista.length) }), ' veículo(s)'])]));
+      var tbody = el('tbody');
+      lista.slice(0, 500).forEach(function (v) {
+        tbody.appendChild(el('tr', { classe: 'clicavel', onclick: function () { abrirFichaVeiculo(v.veiculo_id); } }, [
+          el('td', {}, [placa(v.placa), el('small', { texto: v.veiculo_id })]),
+          el('td', {}, [document.createTextNode(v.tipo || '—'), el('small', { texto: v.marca_modelo || '' })]),
+          el('td', {}, [document.createTextNode(nomeFilial(v.cnpj_proprietario)), el('small', { texto: v.uf_registro })]),
+          el('td', {}, [document.createTextNode(ROTULOS.SITUACAO[v.situacao] || v.situacao), v.locatario ? el('small', { texto: v.locatario }) : null]),
+          el('td', {}, [seloIpva(v)]),
+          el('td', {}, [selo(ROTULOS.LIC[v.licenciamento] || [v.licenciamento, 'mudo'])])
+        ]));
+      });
+      alvo.appendChild(el('div', { classe: 'tabela-envoltorio' }, [el('table', {}, [
+        el('thead', {}, [el('tr', {}, ['Placa', 'Tipo', 'Filial', 'Situação', 'IPVA ' + estado.veic.exercicio, 'Licenciamento ' + estado.veic.exercicio].map(function (h) { return el('th', { texto: h }); }))]),
+        tbody
+      ])]));
+      if (lista.length > 500) alvo.appendChild(el('p', { classe: 'mudo', texto: 'Mostrando 500 de ' + lista.length + '. Use os filtros.' }));
+    }
+    function abrirFichaVeiculo(id) {
+      abrirGaveta('Carregando…', '', el('p', { classe: 'mudo', texto: 'Buscando o veículo…' }), []);
+      chamar('fichaVeiculo', { veiculo_id: id }).then(function (d) {
+        var v = d.veiculo;
+        var kv = el('dl', { classe: 'kv' });
+        [['RENAVAM', v.renavam], ['Chassi', v.chassi], ['Tipo', v.tipo + ' (' + (v.categoria || '') + ')'], ['Marca/modelo', v.marca_modelo],
+          ['Ano', [v.ano_fabricacao, v.ano_modelo].filter(Boolean).join('/')], ['Filial', nomeFilial(v.cnpj_proprietario) + ' · ' + (v.cnpj_proprietario || '')],
+          ['UF de registro', v.uf_registro], ['Situação', ROTULOS.SITUACAO[v.situacao] || v.situacao], ['Isento de IPVA', v.isento_ipva === 'S' ? 'Sim (' + (v.motivo_isencao || '') + ')' : 'Não'],
+          ['Forma de pgto. IPVA', v.forma_pgto_ipva_padrao || 'padrão da CONFIG'], ['Venda/baixa', dataBR(v.data_venda)], ['Observações', v.observacoes]
+        ].forEach(function (p) { kv.appendChild(el('div', {}, [el('dt', { texto: p[0] }), el('dd', { texto: p[1] === null || p[1] === undefined || p[1] === '' ? '—' : String(p[1]) })])); });
+        var obr = el('ul', { classe: 'lista-simples' });
+        if (!d.obrigacoes.length) obr.appendChild(el('li', { classe: 'mudo', texto: 'Nenhuma obrigação gerada.' }));
+        d.obrigacoes.forEach(function (o) {
+          obr.appendChild(el('li', {}, [
+            el('span', {}, [el('strong', { texto: o.tributo + ' ' + o.exercicio + ' · ' + Core.obrigacoes.rotuloParcela(o.parcela) }), el('small', { texto: 'Vence ' + dataBR(o.vencimento) + (o.nr_lancamento_erp ? ' · ' + o.nr_lancamento_erp : '') })]),
+            el('span', {}, [document.createTextNode(moeda(o.valor) + (o.camada ? ' (' + o.camada.toLowerCase() + ') ' : ' ')), selo([ROTULOS.STATUS[o.status] || o.status, o.status.indexOf('PAGO') === 0 ? 'ok' : (ROTULOS.PRAZO[o.situacao_prazo] || ['', 'mudo'])[1]])])
+          ]));
+        });
+        var loc = el('ul', { classe: 'lista-simples' });
+        if (!d.locacoes.length) loc.appendChild(el('li', { classe: 'mudo', texto: 'Sem locações registradas.' }));
+        d.locacoes.forEach(function (l) {
+          loc.appendChild(el('li', {}, [el('span', {}, [el('strong', { texto: l.locatario }), el('small', { texto: (l.contrato_ref || '') })]), el('span', { texto: dataBR(l.inicio) + ' → ' + (l.fim ? dataBR(l.fim) : 'vigente') })]));
+        });
+        var corpo = el('div', {}, [
+          el('div', { classe: 'secao' }, [el('h3', { texto: 'Cadastro' }), kv]),
+          el('div', { classe: 'secao' }, [el('h3', { texto: 'Obrigações' }), obr]),
+          el('div', { classe: 'secao' }, [el('h3', { texto: 'Locações (painel de locação)' }), loc])
+        ]);
+        var botoes = podeEditar() ? [
+          el('button', { classe: 'botao', texto: 'Editar', onclick: function () { abrirFormVeiculo(v); } }),
+          el('button', { classe: 'botao', texto: 'Transferir', onclick: function () { abrirTransferir(v); } }),
+          ['VENDIDO', 'BAIXADO'].indexOf(v.situacao) < 0 ? el('button', { classe: 'botao perigo', texto: 'Vender / baixar', onclick: function () { abrirVender(v); } }) : null
+        ] : [];
+        abrirGaveta(Core.placa.formatarPlaca(v.placa), v.veiculo_id + ' · ' + (v.tipo || ''), corpo, botoes);
+      }).catch(function (e) { abrirGaveta('Erro', '', el('div', { classe: 'caixa erro', texto: e.message }), []); });
+    }
+    function abrirFormVeiculo(v) {
+      var novo = !v; v = v || { situacao: 'OPERACAO_PROPRIA', tipo: '', isento_ipva: 'N' };
+      var d = estado.veic;
+      var form = el('form', { classe: 'form', onsubmit: function (e) { e.preventDefault(); } });
+      var dicaPlaca = el('p', { classe: 'dica' }), dicaRen = el('p', { classe: 'dica' });
+      var inPlaca = entrada('placa', v.placa, { required: true, autocomplete: 'off', style: 'text-transform:uppercase' });
+      var inRen = entrada('renavam', v.renavam, { inputmode: 'numeric', autocomplete: 'off' });
+      function outros() { return d.veiculos.filter(function (x) { return x.veiculo_id !== v.veiculo_id; }); }
+      function checarPlaca() {
+        var val = inPlaca.value, fmt = Core.placa.formatoPlaca(val), n = Core.placa.normalizarPlaca(val);
+        if (!val) { dicaPlaca.textContent = ''; return; }
+        if (!fmt) { dicaPlaca.className = 'dica erro'; dicaPlaca.textContent = 'Formato inválido (ABC1234 ou ABC1D23)'; return; }
+        var dup = outros().filter(function (x) { return x.placa_norm === n; })[0];
+        dicaPlaca.className = dup ? 'dica erro' : 'dica ok';
+        dicaPlaca.textContent = dup ? 'Equivale a ' + dup.placa + ' (' + dup.veiculo_id + ', ' + (ROTULOS.SITUACAO[dup.situacao] || dup.situacao) + ')' : (fmt === 'MERCOSUL' ? 'Mercosul · equivale a ' + n : 'Formato antigo · Mercosul ' + Core.placa.paraMercosul(val));
+      }
+      function checarRen() {
+        var val = inRen.value;
+        if (!val) { dicaRen.className = 'dica'; dicaRen.textContent = 'Obrigatório para veículo ativo'; return; }
+        var r = Core.renavam.normalizarRenavam(val);
+        if (!Core.renavam.renavamValido(val)) { dicaRen.className = 'dica erro'; dicaRen.textContent = 'Dígito verificador inválido'; return; }
+        var dup = outros().filter(function (x) { return x.renavam === r; })[0];
+        dicaRen.className = dup ? 'dica erro' : 'dica ok';
+        dicaRen.textContent = dup ? 'Já pertence a ' + dup.placa + ' (' + dup.veiculo_id + ')' : 'Válido · ' + r;
+      }
+      inPlaca.addEventListener('input', checarPlaca); inRen.addEventListener('input', checarRen);
+      var selFilial = opcoes(el('select', { name: 'cnpj_proprietario', required: true }), [['', 'Escolha a filial']].concat(d.filiais.filter(function (f) { return f.ativo !== 'N' || f.cnpj === v.cnpj_proprietario; }).map(function (f) { return [f.cnpj, f.nome_curto + ' (' + f.uf + ')']; })), v.cnpj_proprietario);
+      var selUf = opcoes(el('select', { name: 'uf_registro', required: true }), [['', 'UF']].concat(d.enums.UF), v.uf_registro);
+      selFilial.addEventListener('change', function () { var f = d.filiais.filter(function (x) { return x.cnpj === selFilial.value; })[0]; if (f && !selUf.value) selUf.value = f.uf; });
+      [
+        campo('Placa *', inPlaca, dicaPlaca), campo('RENAVAM', inRen, dicaRen),
+        campo('Tipo *', opcoes(el('select', { name: 'tipo', required: true }), [['', 'Escolha']].concat(d.enums.TIPO_VEICULO), v.tipo)),
+        campo('Situação *', opcoes(el('select', { name: 'situacao' }), d.enums.SITUACAO_VEICULO.filter(function (s) { return novo ? ['VENDIDO', 'BAIXADO', 'HISTORICO'].indexOf(s) < 0 : true; }).map(function (s) { return [s, ROTULOS.SITUACAO[s] || s]; }), v.situacao)),
+        campo('Filial (CNPJ) *', selFilial), campo('UF de registro *', selUf),
+        campo('Município de registro', entrada('municipio_registro', v.municipio_registro)), campo('Chassi', entrada('chassi', v.chassi)),
+        campo('Marca/modelo', entrada('marca_modelo', v.marca_modelo), null, true),
+        campo('Ano de fabricação', entrada('ano_fabricacao', v.ano_fabricacao, { inputmode: 'numeric' })), campo('Ano do modelo', entrada('ano_modelo', v.ano_modelo, { inputmode: 'numeric' })),
+        campo('Data de aquisição', entrada('data_aquisicao', v.data_aquisicao, { type: 'date' })),
+        campo('Forma de pagamento do IPVA', opcoes(el('select', { name: 'forma_pgto_ipva_padrao' }), [['', 'Padrão da CONFIG']].concat(d.enums.FORMA_PGTO_IPVA), v.forma_pgto_ipva_padrao)),
+        campo('Isento de IPVA', opcoes(el('select', { name: 'isento_ipva' }), [['N', 'Não'], ['S', 'Sim']], v.isento_ipva || 'N')), campo('Motivo da isenção', entrada('motivo_isencao', v.motivo_isencao)),
+        campo('Observações', el('textarea', { name: 'observacoes', style: 'min-height:60px;font-family:inherit' }, [v.observacoes || '']), null, true)
+      ].forEach(function (x) { form.appendChild(x); });
+      if (novo) {
+        form.appendChild(campo('Exercício ' + d.exercicio, el('div', { classe: 'opcoes' }, [
+          el('label', {}, [el('input', { type: 'radio', name: 'exercicioAcao', value: 'GERAR', checked: true }), el('span', { texto: 'Gerar as obrigações deste exercício (IPVA e licenciamento)' })]),
+          el('label', {}, [el('input', { type: 'radio', name: 'exercicioAcao', value: 'QUITADAS' }), el('span', { texto: 'Já está quitado (zero-km emplacado ou usado comprado com o ano pago)' })]),
+          el('label', {}, [el('input', { type: 'radio', name: 'exercicioAcao', value: 'DEPOIS' }), el('span', { texto: 'Deixar para a próxima geração do exercício' })])
+        ]), null, true));
+      }
+      checarPlaca(); checarRen();
+      var avisoArea = el('div');
+      var corpo = el('div', {}, [form, avisoArea]);
+      function salvar(confirmar) {
+        var dados = valoresDoForm(form);
+        var acao = dados.exercicioAcao; delete dados.exercicioAcao;
+        dados.placa = Core.placa.limparPlaca(dados.placa);
+        if (!novo) dados.veiculo_id = v.veiculo_id;
+        botaoSalvar.disabled = true; avisoArea.innerHTML = '';
+        chamar('salvarVeiculo', { veiculo: dados, novo: novo, exercicioAcao: acao, confirmarAvisos: !!confirmar, exercicio: d.exercicio }).then(function (r) {
+          botaoSalvar.disabled = false;
+          if (!r.ok) {
+            avisoArea.appendChild(el('div', { classe: 'caixa alerta' }, [el('strong', { texto: 'Confira antes de salvar:' }), el('ul', {}, r.avisos.map(function (a) { return el('li', { texto: a }); })),
+              el('button', { classe: 'botao primario', texto: 'Salvar mesmo assim', onclick: function () { salvar(true); } })]));
+            return;
+          }
+          var msg = (novo ? 'Veículo ' + r.veiculo_id + ' cadastrado' : 'Cadastro atualizado') + (r.exercicio ? ' · ' + r.exercicio.geradas + ' obrigação(ões) criada(s)' : '');
+          toast(msg); fecharGaveta(); telaVeiculos();
+        }).catch(function (e) { botaoSalvar.disabled = false; avisoArea.appendChild(el('div', { classe: 'caixa erro', texto: e.message })); });
+      }
+      var botaoSalvar = el('button', { classe: 'botao primario', texto: novo ? 'Cadastrar veículo' : 'Salvar alterações', onclick: function () { salvar(false); } });
+      abrirGaveta(novo ? 'Novo veículo' : 'Editar ' + Core.placa.formatarPlaca(v.placa), novo ? 'Placa, filial, tipo e situação são obrigatórios' : v.veiculo_id, corpo, [el('button', { classe: 'botao', texto: 'Cancelar', onclick: fecharGaveta }), botaoSalvar]);
+    }
+    function abrirTransferir(v) {
+      var d = estado.veic;
+      var form = el('form', { classe: 'form', onsubmit: function (e) { e.preventDefault(); } }, [
+        campo('Nova filial (CNPJ)', opcoes(el('select', { name: 'cnpj' }), d.filiais.filter(function (f) { return f.ativo !== 'N'; }).map(function (f) { return [f.cnpj, f.nome_curto + ' (' + f.uf + ')']; }), v.cnpj_proprietario)),
+        campo('UF de registro', opcoes(el('select', { name: 'uf' }), [['', 'A da filial']].concat(d.enums.UF), '')),
+        campo('Município', entrada('municipio', v.municipio_registro)), campo('Data', entrada('data', estado.veic.hoje, { type: 'date' })),
+        el('p', { classe: 'mudo inteiro', style: 'grid-column:1/-1', texto: 'Vale para os exercícios seguintes. As obrigações já geradas mantêm a filial e a UF que tinham.' })
+      ]);
+      var msg = el('div');
+      abrirGaveta('Transferir ' + Core.placa.formatarPlaca(v.placa), v.veiculo_id, el('div', {}, [form, msg]), [
+        el('button', { classe: 'botao', texto: 'Cancelar', onclick: fecharGaveta }),
+        el('button', { classe: 'botao primario', texto: 'Transferir', onclick: function () {
+          var dados = valoresDoForm(form); dados.veiculo_id = v.veiculo_id;
+          chamar('transferirVeiculo', dados).then(function (r) { toast(r.nota); fecharGaveta(); telaVeiculos(); }).catch(function (e) { msg.innerHTML = ''; msg.appendChild(el('div', { classe: 'caixa erro', texto: e.message })); });
+        } })
+      ]);
+    }
+    function abrirVender(v) {
+      var form = el('form', { classe: 'form', onsubmit: function (e) { e.preventDefault(); } }, [
+        campo('Situação', opcoes(el('select', { name: 'situacao' }), [['VENDIDO', 'Vendido'], ['BAIXADO', 'Baixado']], 'VENDIDO')),
+        campo('Data *', entrada('data', '', { type: 'date', required: true })),
+        el('p', { classe: 'mudo', style: 'grid-column:1/-1', texto: 'Obrigações que vencem depois desta data e ainda não foram pagas passam a "Não se aplica". Multas de infrações anteriores continuam sendo da Gobor. Nada é apagado.' })
+      ]);
+      var msg = el('div');
+      abrirGaveta('Vender / baixar ' + Core.placa.formatarPlaca(v.placa), v.veiculo_id, el('div', {}, [form, msg]), [
+        el('button', { classe: 'botao', texto: 'Cancelar', onclick: fecharGaveta }),
+        el('button', { classe: 'botao perigo', texto: 'Confirmar', onclick: function () {
+          var dados = valoresDoForm(form); dados.veiculo_id = v.veiculo_id;
+          chamar('venderVeiculo', dados).then(function (r) { toast('Registrado · ' + r.obrigacoesNaoAplica + ' obrigação(ões) passaram a "Não se aplica"'); fecharGaveta(); telaVeiculos(); }).catch(function (e) { msg.innerHTML = ''; msg.appendChild(el('div', { classe: 'caixa erro', texto: e.message })); });
+        } })
+      ]);
+    }
+
+    // ------------------------------------------------------------ IPVA & licenciamento
+    function telaObrigacoes(exercicio) {
+      var c = conteudo();
+      c.appendChild(el('h1', { texto: '🧾 IPVA & Licenciamento' }));
+      var sub = el('p', { classe: 'subtitulo', texto: 'Carregando…' }); c.appendChild(sub);
+      var area = el('div'); c.appendChild(area);
+      chamar('listarObrigacoes', { exercicio: exercicio }).then(function (d) {
+        estado.obr = d;
+        sub.textContent = 'Exercício ' + d.exercicio + ' · ' + d.contagem.TODAS + ' obrigação(ões) · hoje, ' + dataBR(d.hoje);
+        desenharObrigacoes(area);
+      }).catch(function (e) { sub.textContent = ''; mostrarErro(e.message, area); });
+    }
+    function filtrarObrigacoes() {
+      var f = estado.filtrosObr, qPlaca = Core.placa.normalizarPlaca(f.q), q = semAcento(f.q).trim();
+      return estado.obr.obrigacoes.filter(function (o) {
+        if (f.fila !== 'TODAS' && o.filas.indexOf(f.fila) < 0) return false;
+        if (f.tributo && o.tributo !== f.tributo) return false;
+        if (f.uf && o.uf !== f.uf) return false;
+        if (f.filial && o.filial !== f.filial) return false;
+        if (f.mes && String(o.vencimento || '').slice(5, 7) !== f.mes) return false;
+        if (q) {
+          var n = Core.placa.normalizarPlaca(o.placa);
+          if (!(qPlaca && n === qPlaca) && semAcento([o.placa, o.nr_lancamento_erp, o.obrigacao_id].join(' ')).indexOf(q) < 0) return false;
+        }
+        return true;
+      });
+    }
+    function desenharObrigacoes(area) {
+      area.innerHTML = '';
+      var d = estado.obr, f = estado.filtrosObr;
+      var tabelaArea = el('div');
+      function redesenhar() { desenharTabelaObrigacoes(tabelaArea); }
+      var abas = el('div', { classe: 'abas', role: 'tablist' });
+      ROTULOS.FILAS.forEach(function (fila) {
+        abas.appendChild(el('button', { classe: 'aba', role: 'tab', 'aria-selected': f.fila === fila[0] ? 'true' : 'false', onclick: function () { f.fila = fila[0]; desenharObrigacoes(area); } }, [document.createTextNode(fila[1]), el('b', { texto: String(d.contagem[fila[0]] || 0) })]));
+      });
+      function filtro(chave, controle) { controle.addEventListener('input', function () { f[chave] = controle.value; redesenhar(); }); return controle; }
+      var filiais = d.obrigacoes.map(function (o) { return o.filial; }).filter(function (x, i, a) { return x && a.indexOf(x) === i; }).sort();
+      var meses = [['', 'Todos os meses']].concat(['01', '02', '03', '04', '05', '06', '07', '08', '09', '10', '11', '12'].map(function (m) { return [m, m + '/' + d.exercicio]; }));
+      var selEx = opcoes(el('select', { 'aria-label': 'Exercício' }), d.exercicios.map(function (x) { return [x, 'Exercício ' + x]; }), d.exercicio);
+      selEx.addEventListener('change', function () { telaObrigacoes(Number(selEx.value)); });
+      area.appendChild(abas);
+      area.appendChild(el('div', { classe: 'barra' }, [
+        selEx,
+        filtro('q', el('input', { type: 'search', placeholder: 'Placa, MTO ou id', valor: f.q })),
+        filtro('tributo', opcoes(el('select'), [['', 'IPVA e licenciamento'], ['IPVA', 'IPVA'], ['LICENCIAMENTO', 'Licenciamento']], f.tributo)),
+        filtro('uf', opcoes(el('select'), [['', 'Todas as UFs']].concat(['PR', 'SP', 'SC', 'GO', 'RO']), f.uf)),
+        filtro('filial', opcoes(el('select'), [['', 'Todas as filiais']].concat(filiais), f.filial)),
+        filtro('mes', opcoes(el('select'), meses, f.mes)),
+        el('span', { classe: 'espaco' }),
+        d.podeEditar ? el('button', { classe: 'botao primario', texto: 'Colar em lote', onclick: abrirLote }) : null,
+        el('button', { classe: 'botao', texto: 'Exportar CSV', onclick: function () {
+          chamar('exportarFila', { exercicio: d.exercicio, fila: f.fila }).then(function (r) { baixar(r.nome, r.conteudo); }).catch(function (e) { toast(e.message); });
+        } })
+      ]));
+      area.appendChild(tabelaArea);
+      redesenhar();
+    }
+    function desenharTabelaObrigacoes(alvo) {
+      alvo.innerHTML = '';
+      var lista = filtrarObrigacoes();
+      var soma = function (campo) { return lista.reduce(function (s, o) { return s + (Number(o[campo]) || 0); }, 0); };
+      var semEst = lista.filter(function (o) { return o.valor_estimado === null || o.valor_estimado === undefined; }).length;
+      alvo.appendChild(el('div', { classe: 'totais' }, [
+        el('span', {}, [el('strong', { texto: String(lista.length) }), ' obrigação(ões)']),
+        el('span', {}, ['Estimado ', el('strong', { texto: moeda(soma('valor_estimado')) }), semEst ? ' (' + semEst + ' sem estimativa)' : '']),
+        el('span', {}, ['Devido (guias) ', el('strong', { texto: moeda(soma('valor_guia')) })]),
+        el('span', {}, ['Pago ', el('strong', { texto: moeda(soma('valor_pago')) })])
+      ]));
+      var tbody = el('tbody');
+      lista.slice(0, 600).forEach(function (o) {
+        var prazo = ROTULOS.PRAZO[o.situacao_prazo];
+        tbody.appendChild(el('tr', { classe: 'clicavel', onclick: function () { abrirObrigacao(o); } }, [
+          el('td', {}, [placa(o.placa), el('small', { texto: o.filial + ' · ' + o.uf })]),
+          el('td', {}, [document.createTextNode(o.tributo === 'LICENCIAMENTO' ? 'Licenciamento' : 'IPVA'), el('small', { texto: Core.obrigacoes.rotuloParcela(o.parcela) })]),
+          el('td', {}, [document.createTextNode(dataBR(o.vencimento)), prazo ? el('small', {}, [selo(prazo)]) : (o.observacoes && /provis/i.test(o.observacoes) ? el('small', { texto: 'provisório' }) : null)]),
+          el('td', { classe: 'num', texto: moeda(o.valor_estimado) }),
+          el('td', { classe: 'num', texto: moeda(o.valor_guia) }),
+          el('td', { classe: 'num' }, [document.createTextNode(moeda(o.valor_pago)), o.data_pagamento ? el('small', { texto: dataBR(o.data_pagamento) }) : null]),
+          el('td', { texto: o.nr_lancamento_erp || '—' }),
+          el('td', {}, [selo([ROTULOS.STATUS[o.status] || o.status, o.status === 'PAGO' ? 'ok' : o.status === 'PAGO_SEM_LANCAMENTO' || o.status === 'BLOQUEADO' ? 'alerta' : 'mudo'])])
+        ]));
+      });
+      alvo.appendChild(el('div', { classe: 'tabela-envoltorio' }, [el('table', {}, [
+        el('thead', {}, [el('tr', {}, ['Placa', 'Tributo', 'Vencimento', 'Estimado', 'Guia', 'Pago', 'Nº MTO', 'Status'].map(function (h) { return el('th', { texto: h }); }))]),
+        tbody
+      ])]));
+      if (!lista.length) alvo.appendChild(el('p', { classe: 'mudo', texto: estado.obr.contagem.TODAS ? 'Nada nesta fila com estes filtros.' : 'Nenhuma obrigação neste exercício. Gere pelo menu 🚛 Frota → Gerar exercício… na planilha.' }));
+    }
+    function abrirObrigacao(o) {
+      var editar = estado.obr.podeEditar;
+      var kv = el('dl', { classe: 'kv' });
+      [['Obrigação', o.obrigacao_id], ['Filial', o.filial + ' · ' + (o.cnpj || '')], ['Vencimento', dataBR(o.vencimento)], ['Estimado', moeda(o.valor_estimado) + (o.base_estimativa ? ' · ' + o.base_estimativa : '')],
+        ['Responsável', o.responsavel_pgto === 'LOCATARIO' ? 'Locatário (repasse ' + (o.repasse_status || '') + ')' : 'Gobor'], ['Histórico ERP', o.historico], ['Observações', o.observacoes]
+      ].forEach(function (p) { kv.appendChild(el('div', {}, [el('dt', { texto: p[0] }), el('dd', { texto: p[1] || '—' })])); });
+      var form = el('form', { classe: 'form', onsubmit: function (e) { e.preventDefault(); } });
+      var num = function (v) { return v === null || v === undefined ? '' : Core.moeda.formatarNumeroBR(v, 2); };
+      var campos = [
+        el('h3', { classe: 'inteiro', style: 'grid-column:1/-1;margin:4px 0 0;font-size:13px;color:var(--mudo)', texto: 'GUIA (VALOR DEVIDO)' }),
+        campo('Valor da guia (R$)', entrada('valor_guia', num(o.valor_guia), { inputmode: 'decimal' })), campo('Vencimento', entrada('vencimento', o.vencimento, { type: 'date' })),
+        campo('Linha digitável', entrada('linha_digitavel', o.linha_digitavel), null, true),
+        el('h3', { style: 'grid-column:1/-1;margin:4px 0 0;font-size:13px;color:var(--mudo)', texto: 'ERP' }),
+        campo('Nº MTO', entrada('nr_lancamento_erp', o.nr_lancamento_erp, { placeholder: 'MTO 421779' })), campo('Data do lançamento', entrada('data_lancamento_erp', o.data_lancamento_erp, { type: 'date' })),
+        el('h3', { style: 'grid-column:1/-1;margin:4px 0 0;font-size:13px;color:var(--mudo)', texto: 'PAGAMENTO (VALOR E DATA OBRIGATÓRIOS)' }),
+        campo('Valor pago (R$)', entrada('valor_pago', num(o.valor_pago), { inputmode: 'decimal' })), campo('Data do pagamento', entrada('data_pagamento', o.data_pagamento, { type: 'date' })),
+        campo('Encargos (juros + multa)', entrada('encargos', num(o.encargos), { inputmode: 'decimal' })), campo('Desconto obtido', entrada('desconto_obtido', num(o.desconto_obtido), { inputmode: 'decimal' }))
+      ];
+      if (o.tributo === 'LICENCIAMENTO') {
+        campos.push(el('h3', { style: 'grid-column:1/-1;margin:4px 0 0;font-size:13px;color:var(--mudo)', texto: 'CRLV' }));
+        campos.push(campo('CRLV emitido', opcoes(el('select', { name: 'crlv_emitido' }), [['N', 'Não'], ['S', 'Sim']], o.crlv_emitido || 'N')));
+        campos.push(campo('Data do CRLV', entrada('data_crlv', o.data_crlv, { type: 'date' })));
+      }
+      var manuais = [['', 'Manter (calculado pelos campos)'], ['BLOQUEADO', 'Bloquear (informe o motivo)'], ['ISENTO', 'Isento'], ['NAO_APLICA', 'Não se aplica'], ['CANCELADO', 'Cancelar']];
+      if (['ISENTO', 'NAO_APLICA', 'CANCELADO', 'BLOQUEADO'].indexOf(o.status) >= 0) manuais.push(['REABRIR', 'Reabrir']);
+      campos.push(el('h3', { style: 'grid-column:1/-1;margin:4px 0 0;font-size:13px;color:var(--mudo)', texto: 'SITUAÇÃO' }));
+      campos.push(campo('Status (atual: ' + (ROTULOS.STATUS[o.status] || o.status) + ')', opcoes(el('select', { name: 'status_manual' }), manuais, '')));
+      campos.push(campo('Motivo do bloqueio', entrada('bloqueio_motivo', o.bloqueio_motivo)));
+      campos.push(campo('Observações', el('textarea', { name: 'observacoes', style: 'min-height:60px;font-family:inherit' }, [o.observacoes || '']), null, true));
+      campos.forEach(function (x) { form.appendChild(x); });
+      if (!editar) Array.prototype.forEach.call(form.querySelectorAll('input,select,textarea'), function (c) { c.disabled = true; });
+      var msg = el('div');
+      var corpo = el('div', {}, [el('div', { classe: 'secao' }, [kv]), form, msg]);
+      var botoes = editar ? [el('button', { classe: 'botao', texto: 'Cancelar', onclick: fecharGaveta }), el('button', { classe: 'botao primario', texto: 'Salvar', onclick: function () {
+        var dados = valoresDoForm(form), manual = dados.status_manual; delete dados.status_manual;
+        if (manual) dados.status_manual = manual;
+        var alteracoes = {}; Object.keys(dados).forEach(function (k) { if (k !== 'status_manual') alteracoes[k] = dados[k]; });
+        if (manual) alteracoes.status_manual = manual;
+        chamar('atualizarObrigacao', { obrigacao_id: o.obrigacao_id, alteracoes: alteracoes }).then(function (novo) {
+          var lista = estado.obr.obrigacoes;
+          for (var i = 0; i < lista.length; i++) if (lista[i].obrigacao_id === novo.obrigacao_id) lista[i] = Object.assign({}, lista[i], novo);
+          toast('Salvo · ' + (ROTULOS.STATUS[novo.status] || novo.status)); fecharGaveta(); telaObrigacoes(estado.obr.exercicio);
+        }).catch(function (e) { msg.innerHTML = ''; msg.appendChild(el('div', { classe: 'caixa erro', texto: e.message })); });
+      } })] : [];
+      abrirGaveta(Core.placa.formatarPlaca(o.placa) + ' · ' + (o.tributo === 'LICENCIAMENTO' ? 'Licenciamento' : 'IPVA') + ' ' + o.exercicio, Core.obrigacoes.rotuloParcela(o.parcela) + ' · ' + (ROTULOS.STATUS[o.status] || o.status), corpo, botoes);
+    }
+    function abrirLote() {
+      var ajuda = {
+        GUIA: 'placa ; tributo ; parcela ; valor ; vencimento ; linha digitável (opcional)\nEx.: BEU1D91;IPVA;U;1.950,00;11/01/2027',
+        MTO: 'placa ; tributo ; parcela ; nº MTO\nEx.: BEU1D91;IPVA;U;MTO 421779',
+        PAGAMENTO: 'placa ; tributo ; parcela ; valor pago ; data ; nº MTO (opcional)\nEx.: BEU1D91;IPVA;U;1.950,00;10/01/2027;MTO 421779'
+      };
+      var tipo = 'GUIA';
+      var dica = el('pre', { classe: 'caixa', style: 'white-space:pre-wrap;margin:0;font-size:12px', texto: ajuda.GUIA });
+      var ta = el('textarea', { placeholder: 'Cole aqui as linhas (pode copiar direto do Excel ou do Sheets). Parcela: U = cota única, ou 1 a 5. Tributo: IPVA ou LIC.' });
+      var resultado = el('div');
+      var radios = el('div', { classe: 'opcoes', style: 'grid-auto-flow:column;justify-content:start;gap:16px' }, [['GUIA', 'Valores de guia'], ['MTO', 'Nº MTO (ERP)'], ['PAGAMENTO', 'Pagamentos']].map(function (t) {
+        var r = el('input', { type: 'radio', name: 'tipoLote', value: t[0], checked: t[0] === 'GUIA', onchange: function () { tipo = t[0]; dica.textContent = ajuda[tipo]; resultado.innerHTML = ''; } });
+        return el('label', {}, [r, el('span', { texto: t[1] })]);
+      }));
+      var aplicar = el('button', { classe: 'botao primario', texto: 'Aplicar', disabled: true });
+      function previa() {
+        resultado.innerHTML = ''; carregando(resultado, 'Conferindo as linhas…');
+        chamar('previaLote', { tipo: tipo, texto: ta.value, exercicio: estado.obr.exercicio }).then(function (p) {
+          resultado.innerHTML = '';
+          resultado.appendChild(el('div', { classe: 'caixa ' + (p.comErro ? 'alerta' : 'ok'), texto: p.validos + ' linha(s) válida(s) · ' + p.comErro + ' com erro' + (p.comErro ? ' (serão ignoradas ao aplicar)' : '') }));
+          var tbody = el('tbody');
+          p.itens.forEach(function (i) {
+            tbody.appendChild(el('tr', {}, [el('td', { texto: String(i.linha) }), el('td', { texto: [i.placa, i.tributo, i.parcela].join(' · ') }),
+              el('td', {}, [i.erro ? selo(['✖ ' + i.erro, 'erro']) : selo(['✔ ' + (ROTULOS.STATUS[i.patch.status] || i.patch.status), 'ok']), i.aviso ? el('small', { texto: i.aviso }) : null])]));
+          });
+          resultado.appendChild(el('div', { classe: 'tabela-envoltorio' }, [el('table', {}, [el('thead', {}, [el('tr', {}, ['Linha', 'Obrigação', 'Resultado'].map(function (h) { return el('th', { texto: h }); }))]), tbody])]));
+          aplicar.disabled = !p.validos;
+          aplicar.textContent = 'Aplicar ' + p.validos + ' linha(s)';
+        }).catch(function (e) { resultado.innerHTML = ''; resultado.appendChild(el('div', { classe: 'caixa erro', texto: e.message })); });
+      }
+      aplicar.addEventListener('click', function () {
+        aplicar.disabled = true;
+        chamar('aplicarLote', { tipo: tipo, texto: ta.value, exercicio: estado.obr.exercicio }).then(function (r) {
+          toast(r.aplicados + ' obrigação(ões) atualizada(s)' + (r.ignorados ? ' · ' + r.ignorados + ' linha(s) com erro ignorada(s)' : ''));
+          fecharGaveta(); telaObrigacoes(estado.obr.exercicio);
+        }).catch(function (e) { aplicar.disabled = false; resultado.appendChild(el('div', { classe: 'caixa erro', texto: e.message })); });
+      });
+      abrirGaveta('Colar em lote', 'Exercício ' + estado.obr.exercicio, el('div', { style: 'display:grid;gap:12px' }, [radios, dica, el('label', { classe: 'campo' }, [ta]), resultado]), [
+        el('button', { classe: 'botao', texto: 'Cancelar', onclick: fecharGaveta }), el('button', { classe: 'botao', texto: 'Pré-visualizar', onclick: previa }), aplicar
+      ]);
+    }
+
+    // ------------------------------------------------------------ roteamento
     function rotear() {
       var id = (location.hash || '#/visao-geral').replace('#/', '');
       var t = telasPermitidas().filter(function (x) { return x.id === id; })[0] || telasPermitidas()[0];
       montarMenu(t.id);
+      fecharGaveta();
       document.getElementById('lateral').classList.remove('aberta');
       if (t.id === 'visao-geral') telaVisaoGeral();
       else if (t.id === 'admin') telaAdmin();
+      else if (t.id === 'veiculos') telaVeiculos();
+      else if (t.id === 'ipva-licenciamento') telaObrigacoes();
       else telaEmConstrucao(t);
       document.getElementById('conteudo').focus();
     }
@@ -138,8 +588,7 @@
     });
 
     chamar('meuPerfil').then(function (eu) {
-      estado.eu = eu;
-      estado.perfil = eu.perfil;
+      estado.eu = eu; estado.perfil = eu.perfil;
       document.getElementById('usuario').textContent = eu.email + ' · ' + eu.perfil;
       window.addEventListener('hashchange', rotear);
       rotear();

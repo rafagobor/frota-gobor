@@ -287,7 +287,7 @@ export function criarAmbiente({ usuario = 'rafael@gobor.com.br', proprietario = 
         t.evaluate = () => ({ titulo: null, conteudo: html, setTitle(x) { this.titulo = x; return this; }, addMetaTag() { return this; }, setXFrameOptionsMode() { return this; } });
         return t;
       },
-      createHtmlOutput: () => ({ setWidth() { return this; }, setHeight() { return this; } }),
+      createHtmlOutput: (html) => ({ titulo: null, conteudo: html, setWidth() { return this; }, setHeight() { return this; }, setTitle(x) { this.titulo = x; return this; }, addMetaTag() { return this; }, setXFrameOptionsMode() { return this; } }),
       XFrameOptionsMode: { DEFAULT: 'DEFAULT' },
     },
   };

@@ -72,6 +72,10 @@ export function validarObrigacao(o) {
     if (!(Number(o.valor_pago) > 0)) erros.push('valor_pago é obrigatório (e maior que zero) para marcar como pago');
     if (!ehIso(o.data_pagamento)) erros.push('data_pagamento é obrigatória para marcar como pago');
   }
+  const temValor = Number(o.valor_pago) > 0, temData = ehIso(o.data_pagamento);
+  if (temValor !== temData && status !== 'PAGO' && status !== 'PAGO_SEM_LANCAMENTO') {
+    erros.push(temValor ? 'Informe também a data_pagamento (valor e data do pagamento vão juntos)' : 'Informe também o valor_pago (valor e data do pagamento vão juntos)');
+  }
   if (status === 'PAGO' && !normalizarMto(o.nr_lancamento_erp)) erros.push('PAGO exige nº de lançamento no ERP (MTO); sem ele, use PAGO_SEM_LANCAMENTO');
   if (status === 'LANCADO_ERP' && !normalizarMto(o.nr_lancamento_erp)) erros.push('LANCADO_ERP exige nº de lançamento no ERP (MTO)');
   if (status === 'BLOQUEADO' && !String(o.bloqueio_motivo || '').trim()) erros.push('BLOQUEADO exige bloqueio_motivo');
@@ -100,4 +104,63 @@ export function situacaoPrazo(vencimento, hoje, quitada, diasAlerta = 7) {
   if (d === 0) return 'VENCE_HOJE';
   if (d <= diasAlerta) return 'VENCE_EM_7_DIAS';
   return 'EM_DIA';
+}
+
+/** Rótulo da parcela: "cota única", "1ª parcela"… */
+export function rotuloParcela(parcela) {
+  return String(parcela) === 'U' ? 'cota única' : `${parcela}ª parcela`;
+}
+
+/** Histórico padrão do lançamento no ERP (prompt §5.13): "IPVA 2027 – 1ª parcela – BEU1D91". */
+export function historicoErp(o) {
+  const trib = o.tributo === 'LICENCIAMENTO' ? 'Licenciamento' : o.tributo === 'OUTRO' ? (o.descricao_outro || 'Outro') : 'IPVA';
+  const meio = o.tributo === 'IPVA' ? ` – ${rotuloParcela(o.parcela)}` : '';
+  return `${trib} ${o.exercicio}${meio} – ${o.placa || ''}`.trim();
+}
+
+export const FILAS = {
+  A_LANCAR_ERP: 'A lançar no ERP',
+  PAGO_SEM_LANCAMENTO: 'Pagos sem lançamento',
+  VENCIDOS: 'Vencidos',
+  BLOQUEADOS: 'Bloqueados',
+  SEM_ESTIMATIVA: 'Sem estimativa',
+};
+
+/**
+ * Situação de prazo e filas de trabalho de uma obrigação.
+ * @returns {{situacao_prazo:string|null, filas:string[]}}
+ */
+export function classificar(o, hoje, diasAlerta = 7) {
+  const quitada = obrigacaoQuitada(o);
+  const situacao = situacaoPrazo(o.vencimento, hoje, quitada || o.status === 'BLOQUEADO', diasAlerta);
+  const filas = [];
+  const ativa = !['CANCELADO', 'NAO_APLICA', 'ISENTO'].includes(o.status);
+  if (ativa && Number(o.valor_guia) > 0 && !normalizarMto(o.nr_lancamento_erp) && !temPagamento(o)) filas.push('A_LANCAR_ERP');
+  if (o.status === 'PAGO_SEM_LANCAMENTO') filas.push('PAGO_SEM_LANCAMENTO');
+  if (situacao === 'VENCIDO') filas.push('VENCIDOS');
+  if (o.status === 'BLOQUEADO') filas.push('BLOQUEADOS');
+  if (ativa && !quitada && (o.valor_estimado === null || o.valor_estimado === undefined || o.valor_estimado === '') && !(Number(o.valor_guia) > 0)) filas.push('SEM_ESTIMATIVA');
+  return { situacao_prazo: situacao, filas };
+}
+
+/** Valor da camada mais avançada disponível: pago → guia → estimado. */
+export function valorAtual(o) {
+  if (Number(o.valor_pago) > 0) return { camada: 'PAGO', valor: Number(o.valor_pago) };
+  if (Number(o.valor_guia) > 0) return { camada: 'DEVIDO', valor: Number(o.valor_guia) };
+  if (o.valor_estimado !== null && o.valor_estimado !== undefined && o.valor_estimado !== '') return { camada: 'ESTIMADO', valor: Number(o.valor_estimado) };
+  return { camada: null, valor: null };
+}
+
+/** CSV (";", pt-BR) da fila "A lançar no ERP", com os campos que o lançamento precisa. */
+export function csvLancamentoErp(obrigacoes) {
+  const cab = ['CNPJ', 'Placa', 'Tributo', 'Parcela', 'Vencimento', 'Valor', 'Linha digitável', 'Histórico', 'Obrigação'];
+  const br = (iso) => (iso ? iso.split('-').reverse().join('/') : '');
+  const num = (v) => (v === null || v === undefined || v === '' ? '' : Number(v).toFixed(2).replace('.', ','));
+  const esc = (v) => {
+    const s = String(v === null || v === undefined ? '' : v);
+    return /[;"\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+  };
+  const linhas = obrigacoes.map((o) => [o.cnpj, o.placa, o.tributo, rotuloParcela(o.parcela), br(o.vencimento), num(o.valor_guia),
+    o.linha_digitavel, historicoErp(o), o.obrigacao_id].map(esc).join(';'));
+  return [cab.join(';'), ...linhas].join('\n') + '\n';
 }

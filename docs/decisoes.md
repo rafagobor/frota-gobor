@@ -442,3 +442,31 @@ O usuário não usa terminal, então a instalação passou a ser só pelo navega
 | D-29 | **Arquivo único `dist/Frota.gs`**, gerado no build e versionado: núcleo, servidor e painel (o HTML numa constante). É colado uma vez no Apps Script da planilha. Não precisa de `appsscript.json`: o Apps Script detecta os escopos, e o fuso é explícito no código |
 | D-30 | O arquivo é **100% ASCII**: o que não é ASCII vira `\\uXXXX`. Na primeira tentativa, a conversão para documento Google corrompeu os emojis. Há um teste que simula copiar e colar (recuo perdido, linhas em branco dobradas) |
 | D-31 | Com autorização do usuário ("preciso que fique mais fácil"), o Claude criou no Drive, pelo conector, a pasta "🚛 Frota Gobor — Documentos", com "📤 Importação" e os 7 CSVs (carga e referências 2027), e o documento "Frota.gs — copiar e colar no Apps Script". O setup reaproveita essas pastas pelo nome. O primeiro documento, com os emojis corrompidos, foi para a lixeira |
+
+---
+
+## 15. Fase 3 (parte 2): telas de operação, entregue em 18/11/2026 (versão 0.3.0)
+
+**O que foi entregue:**
+- **Veículos:**
+  - lista com filtros (placa em qualquer formato, UF, filial, tipo, situação e alertas) e selos de IPVA e licenciamento do exercício;
+  - ficha com cadastro, obrigações e locações;
+  - **novo veículo** com validação ao vivo (formato e equivalência Mercosul, DV do RENAVAM, duplicidade inclusive com vendidos, com "reativar?") e escolha do exercício corrente (gerar, já quitado ou deixar para depois);
+  - edição, transferência de filial/UF (retrato antigo preservado) e venda/baixa (obrigações futuras não pagas passam a NAO_APLICA).
+- **IPVA & Licenciamento:**
+  - abas Todas, A lançar no ERP, Pagos sem lançamento, Vencidos, Bloqueados e Sem estimativa;
+  - filtros e totais nas três camadas (estimado, devido e pago);
+  - edição de cada obrigação: guia, MTO, pagamento (valor e data obrigatórios), encargos, CRLV, bloqueio com motivo, isenção e reabertura, com transições validadas;
+  - **colagem em lote** (guias, MTO e pagamentos, direto do Excel/Sheets, com prévia linha a linha);
+  - **exportação CSV**, com a fila do ERP no histórico padrão ("IPVA 2027 – cota única – BEU1D91").
+- Toda alteração feita pelo painel é auditada (origem WEBAPP). O perfil CONSULTA só lê.
+
+**Decisões técnicas:**
+
+| # | Decisão |
+|---|---|
+| D-32 | Valor e data do pagamento só são aceitos juntos (regra do núcleo, vale para tela, lote e importação) |
+| D-33 | Pagamento acima do valor da guia registra a diferença como `encargos` |
+| D-34 | O painel embute um núcleo enxuto e minificado (`core/cliente.js`: placa, RENAVAM, moeda, datas) para validar no navegador com as mesmas regras do servidor |
+| D-35 | O HTML do painel é servido pronto com `createHtmlOutput`, sem motor de template, e a versão é gravada no build |
+| D-36 | "Abrir painel" usa `URL_WEBAPP` da CONFIG ou, se vazio, `ScriptApp.getService().getUrl()` |

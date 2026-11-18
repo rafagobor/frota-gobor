@@ -19,5 +19,6 @@ export * as veiculos from './veiculos.js';
 export * as config from './config-padrao.js';
 export * as importacao from './importacao.js';
 export * as exercicio from './exercicio.js';
+export * as lote from './lote.js';
 
-export const VERSAO = '0.2.0';
+export const VERSAO = '0.3.0';

@@ -22,7 +22,10 @@
       <p class="mudo">Carregando…</p>
     </main>
   </div>
-  <footer class="rodape">Versão <?= versao ?> · dados no fuso America/Sao_Paulo</footer>
+  <div class="gaveta" id="gaveta" hidden><div class="veu" data-fechar="1"></div><section class="painel-gaveta" id="painelGaveta" role="dialog" aria-modal="true" tabindex="-1"></section></div>
+  <div class="aviso-flutuante" id="toast" role="status" hidden></div>
+  <footer class="rodape">Versão __VERSAO__ · dados no fuso America/Sao_Paulo</footer>
+  <!--CORE-->
   <?!= incluir_('ui/app') ?>
 </body>
 </html>

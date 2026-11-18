@@ -406,3 +406,120 @@ test('dist/Frota.gs é ASCII puro e sobrevive a copiar/colar (linhas em branco e
   const raiz = amb.driveCompartilhado.filhos.find((f) => f.nome === '\u{1F69B} Frota Gobor \u2014 Documentos');
   assert.ok(raiz.filhos.some((f) => f.nome === '\u{1F4E4} Importa\u00e7\u00e3o'));
 });
+
+async function baseOperacional() {
+  const { readFileSync } = await import('node:fs');
+  const r = comSetup();
+  const pasta = colocarCsvs(r.amb, r.g, { FILIAIS: CSV_FILIAIS, LOCATARIOS: CSV_LOCATARIOS, VEICULOS: CSV_VEICULOS, LOCACOES: CSV_LOCACOES });
+  for (const t of ['CALENDARIO_VENCIMENTOS', 'ALIQUOTAS_IPVA', 'TAXAS_LICENCIAMENTO']) pasta.createFile(`${t}.csv`, readFileSync(`referencias/2027/${t}.csv`, 'utf8'));
+  r.g.menuImportarCsv();
+  r.amb.estado.respostaPrompt = '2027';
+  r.g.menuGerarExercicio();
+  return r;
+}
+
+function ok(resposta) {
+  assert.equal(resposta.ok, true, resposta.erro);
+  return resposta.dados;
+}
+
+test('painel: veículos (lista, ficha, novo com exercício, aviso de reativação, transferência, venda)', async () => {
+  const { amb, g } = await baseOperacional();
+  const lista = ok(g.api('listarVeiculos', { exercicio: 2027 }));
+  assert.equal(lista.veiculos.length, 2);
+  const beu = lista.veiculos.find((v) => v.placa === 'BEU1D91');
+  assert.equal(beu.ipva, 'EM_DIA');
+  assert.equal(beu.licenciamento, 'EM_DIA');
+  assert.equal(lista.veiculos.find((v) => v.placa === 'NCK4696').locatario, 'MND SERVICOS');
+  const ficha = ok(g.api('fichaVeiculo', { veiculo_id: 'V0001' }));
+  assert.equal(ficha.obrigacoes.length, 2);
+
+  // novo veículo com obrigações do exercício
+  const novo = ok(g.api('salvarVeiculo', { novo: true, exercicio: 2027, exercicioAcao: 'GERAR', veiculo: {
+    placa: 'abc-1234', renavam: '01219574594', tipo: 'CAVALO', cnpj_proprietario: '77.505.550/0001-97', uf_registro: 'PR', situacao: 'OPERACAO_PROPRIA' } }));
+  assert.equal(novo.ok, true);
+  assert.equal(novo.veiculo_id, 'V0003');
+  assert.equal(novo.exercicio.geradas, 2);
+  assert.equal(g.Db.porChave('OBRIGACOES')['2027-IPVA-V0003-U'].vencimento, '2027-01-12', 'final 4 → 12/01 (provisório)');
+  // RENAVAM inválido e placa duplicada são recusados
+  assert.match(g.api('salvarVeiculo', { novo: true, veiculo: { placa: 'XYZ9999', renavam: '00127280801', tipo: 'CAVALO', cnpj_proprietario: '77.505.550/0001-97', uf_registro: 'PR', situacao: 'OPERACAO_PROPRIA' } }).erro, /RENAVAM inválido/);
+  assert.match(g.api('salvarVeiculo', { novo: true, veiculo: { placa: 'BEU1391', renavam: '00983106606', tipo: 'CAVALO', cnpj_proprietario: '77.505.550/0001-97', uf_registro: 'PR', situacao: 'OPERACAO_PROPRIA' } }).erro, /equivale a BEU1D91/);
+
+  // venda: obrigações futuras viram "não se aplica"
+  const venda = ok(g.api('venderVeiculo', { veiculo_id: 'V0003', situacao: 'VENDIDO', data: '2027-03-01' }));
+  assert.equal(venda.obrigacoesNaoAplica, 1, 'só o licenciamento (ago) vence depois da venda; o IPVA de 12/01 continua devido');
+  assert.equal(g.Db.porChave('OBRIGACOES')['2027-IPVA-V0003-U'].status, 'PREVISTO');
+  assert.equal(g.Db.porChave('OBRIGACOES')['2027-LICENCIAMENTO-V0003-U'].status, 'NAO_APLICA');
+});
+
+test('painel: placa equivalente a veículo vendido pede confirmação (reativar?)', async () => {
+  const { g } = await baseOperacional();
+  ok(g.api('venderVeiculo', { veiculo_id: 'V0001', situacao: 'VENDIDO', data: '2026-12-01' }));
+  const r1 = ok(g.api('salvarVeiculo', { novo: true, veiculo: { placa: 'BEU1391', renavam: '01219574594', tipo: 'CAVALO', cnpj_proprietario: '77.505.550/0001-97', uf_registro: 'PR', situacao: 'OPERACAO_PROPRIA' } }));
+  assert.equal(r1.ok, false);
+  assert.match(r1.avisos.join(' '), /Reativar/);
+  const r2 = ok(g.api('salvarVeiculo', { novo: true, confirmarAvisos: true, exercicioAcao: 'DEPOIS', veiculo: { placa: 'BEU1391', renavam: '01219574594', tipo: 'CAVALO', cnpj_proprietario: '77.505.550/0001-97', uf_registro: 'PR', situacao: 'OPERACAO_PROPRIA' } }));
+  assert.equal(r2.ok, true);
+  const t = ok(g.api('transferirVeiculo', { veiculo_id: r2.veiculo_id, cnpj: '77505550000359', data: '2026-12-10' }));
+  assert.match(t.nota, /Transferido/);
+  assert.equal(g.Db.porChave('VEICULOS')[r2.veiculo_id].uf_registro, 'RO');
+});
+
+test('painel: obrigações (filas, edição, pagamento, lote, exportação, perfil CONSULTA)', async () => {
+  const { amb, g } = await baseOperacional();
+  const d = ok(g.api('listarObrigacoes', { exercicio: 2027 }));
+  assert.equal(d.contagem.TODAS, 4);
+  assert.ok(d.contagem.SEM_ESTIMATIVA >= 1);
+  const ipva = d.obrigacoes.find((o) => o.obrigacao_id === '2027-IPVA-V0001-U');
+  assert.equal(ipva.historico, 'IPVA 2027 – cota única – BEU1D91');
+
+  // guia → fila do ERP → MTO → pagamento
+  const lote = ok(g.api('previaLote', { tipo: 'GUIA', exercicio: 2027, texto: 'BEU1D91\tIPVA\tU\t1.950,00\t11/01/2027\nZZZ0000\tIPVA\tU\t1' }));
+  assert.equal(lote.validos, 1);
+  assert.equal(lote.comErro, 1);
+  const ap = ok(g.api('aplicarLote', { tipo: 'GUIA', exercicio: 2027, texto: 'BEU1D91\tIPVA\tU\t1.950,00\t11/01/2027\nZZZ0000\tIPVA\tU\t1' }));
+  assert.deepEqual([ap.aplicados, ap.ignorados], [1, 1]);
+  const d2 = ok(g.api('listarObrigacoes', { exercicio: 2027 }));
+  assert.equal(d2.contagem.A_LANCAR_ERP, 1);
+  const csv = ok(g.api('exportarFila', { exercicio: 2027, fila: 'A_LANCAR_ERP' }));
+  assert.match(csv.conteudo, /BEU1D91;IPVA;cota única;11\/01\/2027;1950,00;;IPVA 2027 – cota única – BEU1D91/);
+
+  // pagamento sem data é recusado; sem MTO vira "pago sem lançamento"; com MTO vira "pago"
+  assert.match(g.api('atualizarObrigacao', { obrigacao_id: '2027-IPVA-V0001-U', alteracoes: { valor_pago: '1.950,00' } }).erro, /data_pagamento/);
+  const pg = ok(g.api('atualizarObrigacao', { obrigacao_id: '2027-IPVA-V0001-U', alteracoes: { valor_pago: '1.950,00', data_pagamento: '2026-11-10' } }));
+  assert.equal(pg.status, 'PAGO_SEM_LANCAMENTO');
+  const pg2 = ok(g.api('atualizarObrigacao', { obrigacao_id: '2027-IPVA-V0001-U', alteracoes: { nr_lancamento_erp: 'mto 421779' } }));
+  assert.equal(pg2.status, 'PAGO');
+  assert.equal(pg2.nr_lancamento_erp, 'MTO 421779');
+  assert.match(g.api('atualizarObrigacao', { obrigacao_id: '2027-IPVA-V0001-U', alteracoes: { status_manual: 'CANCELADO' } }).erro, /Não é possível passar de PAGO/);
+  // bloqueio exige motivo; reabrir volta ao status calculado
+  assert.match(g.api('atualizarObrigacao', { obrigacao_id: '2027-LICENCIAMENTO-V0001-U', alteracoes: { status_manual: 'BLOQUEADO' } }).erro, /bloqueio_motivo/);
+  ok(g.api('atualizarObrigacao', { obrigacao_id: '2027-LICENCIAMENTO-V0001-U', alteracoes: { status_manual: 'BLOQUEADO', bloqueio_motivo: 'multa em aberto' } }));
+  const reab = ok(g.api('atualizarObrigacao', { obrigacao_id: '2027-LICENCIAMENTO-V0001-U', alteracoes: { status_manual: 'REABRIR' } }));
+  assert.equal(reab.status, 'PREVISTO');
+  const aud = g.Db.lerTodos('AUDITORIA').filter((a) => a.origem === 'WEBAPP' && a.entidade === 'OBRIGACOES');
+  assert.ok(aud.length >= 5, 'toda alteração do painel é auditada');
+
+  // CONSULTA lê mas não altera
+  g.Db.inserir('USUARIOS', [{ email: 'consulta@gobor.com.br', perfil: 'CONSULTA', ativo: 'S' }]);
+  g.Auth.limparCache();
+  amb.estado.usuario = 'consulta@gobor.com.br';
+  assert.equal(g.api('listarObrigacoes', { exercicio: 2027 }).ok, true);
+  assert.equal(ok(g.api('listarObrigacoes', { exercicio: 2027 })).podeEditar, false);
+  assert.match(g.api('aplicarLote', { tipo: 'GUIA', exercicio: 2027, texto: 'BEU1D91;LIC;U;1' }).erro, /não permite/);
+  assert.match(g.api('salvarVeiculo', { novo: true, veiculo: {} }).erro, /não permite/);
+});
+
+test('painel: HTML servido pronto, com núcleo do navegador funcionando', async () => {
+  const vm = await import('node:vm');
+  const { g } = comSetup();
+  const html = g.doGet().conteudo;
+  assert.doesNotMatch(html, /<\?/);
+  const scripts = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((m) => m[1]);
+  const ctx = vm.createContext({});
+  vm.runInContext(scripts[0], ctx);
+  assert.equal(vm.runInContext("Core.placa.normalizarPlaca('CUC6H59')", ctx), 'CUC6759');
+  assert.equal(vm.runInContext("Core.renavam.renavamValido('01272808014')", ctx), true);
+  assert.equal(vm.runInContext('Core.moeda.formatarMoeda(1950)', ctx), 'R$ 1.950,00');
+  assert.equal(vm.runInContext("Core.obrigacoes.rotuloParcela('2')", ctx), '2ª parcela');
+});

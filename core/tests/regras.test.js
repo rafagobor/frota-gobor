@@ -26,6 +26,8 @@ test('obrigações: valor e data obrigatórios para pago', () => {
   assert.deepEqual(O.validarObrigacao({ status: 'PAGO_SEM_LANCAMENTO', valor_pago: 10, data_pagamento: '2027-01-10' }), []);
   assert.ok(O.validarObrigacao({ status: 'BLOQUEADO' }).some((x) => /bloqueio_motivo/.test(x)));
   assert.ok(O.validarObrigacao({ status: 'PREVISTO', valor_guia: -1 }).some((x) => /negativo/.test(x)));
+  assert.ok(O.validarObrigacao({ status: 'GUIA_DISPONIVEL', valor_guia: 10, valor_pago: 10 }).some((x) => /data_pagamento/.test(x)), 'valor sem data');
+  assert.ok(O.validarObrigacao({ status: 'PREVISTO', data_pagamento: '2027-01-10' }).some((x) => /valor_pago/.test(x)), 'data sem valor');
 });
 
 test('obrigações: transições', () => {

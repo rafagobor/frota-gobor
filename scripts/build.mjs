@@ -20,10 +20,24 @@ await build({
   banner: { js: '// GERADO por `npm run build` a partir de core/. NÃO EDITAR ESTE ARQUIVO.' },
 });
 
+// Núcleo do navegador: só o necessário, minificado.
+const cliente = await build({
+  entryPoints: ['core/cliente.js'], bundle: true, format: 'iife', globalName: 'CoreCliente', target: 'es2019',
+  charset: 'utf8', legalComments: 'none', minify: true, write: false,
+});
+const clienteJs = cliente.outputFiles[0].text;
+
 // Painel: index.html com estilos e app embutidos (substitui os <?!= incluir_('ui/...') ?>)
 const ui = (n) => readFileSync(`apps-script/ui/${n}.html`, 'utf8');
-const painel = ui('index').replace(/<\?!=\s*incluir_\('ui\/(\w+)'\)\s*\?>/g, (_, n) => ui(n));
-if (/incluir_\(/.test(painel)) throw new Error('Painel com include não resolvido');
+const coreJs = (clienteJs + '\nvar Core={placa:CoreCliente.placa,renavam:CoreCliente.renavam,moeda:CoreCliente.moeda,' +
+  'datas:{dataBR:CoreCliente.dataBR,parseDataFlex:CoreCliente.parseDataFlex},obrigacoes:{rotuloParcela:CoreCliente.rotuloParcela}};')
+  .replace(/<\//g, '<\\/').replace(/<!--/g, '<\\!--');
+const painel = ui('index')
+  .replace(/<\?!=\s*incluir_\('ui\/(\w+)'\)\s*\?>/g, (_, n) => ui(n))
+  .replace('<!--CORE-->', () => `<script>${coreJs}</script>`)
+  .replace('__VERSAO__', pacote.version);
+// O painel é servido com createHtmlOutput (sem motor de template): nada de "<?" sobrando.
+if (/incluir_\(|<\?|__VERSAO__|<!--CORE-->/.test(painel)) throw new Error('Painel com marcador não resolvido');
 writeFileSync('apps-script/server/01_painel.js',
   '// GERADO por `npm run build` a partir de apps-script/ui/. NÃO EDITAR ESTE ARQUIVO.\n' +
   `var PAINEL_HTML = ${JSON.stringify(painel)};\n`);
