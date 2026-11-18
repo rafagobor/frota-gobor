@@ -200,6 +200,16 @@ def normalizar_tipo(valor):
     return None, True, f'Tipo desconhecido: "{valor}"'
 
 
+def marca_modelo(im):
+    """Marca + modelo do painel, sem repetir a marca quando o modelo já começa com ela."""
+    if not im:
+        return None
+    marca, modelo = (im.get("marca") or "").strip(), (im.get("modelo") or "").strip()
+    if marca and modelo.upper().startswith(marca.upper()):
+        return modelo
+    return " ".join(x for x in [marca, modelo] if x) or None
+
+
 def iso(d):
     if isinstance(d, dt.datetime):
         d = d.date()
@@ -343,7 +353,7 @@ def montar(previa, painel, data_ref: str) -> Proposta:
         pend = [i for i in lista if i["pendente"]]
         v.update({
             "renavam": ren, "chassi": (im or {}).get("chassi") or None, "tipo": tipo, "categoria": CATEGORIA.get(tipo),
-            "marca_modelo": " ".join(x for x in [(im or {}).get("marca"), (im or {}).get("modelo")] if x) or None,
+            "marca_modelo": marca_modelo(im),
             "ano_fabricacao": None, "ano_modelo": None, "cnpj_proprietario": cnpj, "uf_registro": r["uf"] or None,
             "municipio_registro": None, "situacao": "OPERACAO_PROPRIA", "data_aquisicao": None, "data_venda": None,
             "isento_ipva": None, "motivo_isencao": None, "forma_pgto_ipva_padrao": None, "pasta_drive_id": None,
@@ -533,6 +543,8 @@ COLS_LOCATARIOS = ["locatario_id", "nome", "cnpj_cpf", "contato", "email", "tele
 COLS_LOCACOES = ["locacao_id", "veiculo_id", "placa", "locatario_id", "locatario_nome", "inicio", "fim", "contrato_ref",
                  "repassa_multas", "repassa_licenciamento", "repassa_ipva", "observacoes", "ref_painel"]
 COLS_FILIAIS = ["cnpj", "nome_curto", "razao_social", "uf", "municipio", "ativo", "observacoes"]
+COLS_AJUSTES = ["placa", "campo", "valor", "observacao"]
+CAMPOS_AJUSTAVEIS = [c for c in COLS_VEICULOS if c != "veiculo_id"]
 
 AZUL = PatternFill("solid", fgColor="1F3A5F")
 CORES = {"BLOQUEIA": "FBE3E1", "CONFERIR": "FAEED3", "INFO": "E8EEF6"}
@@ -580,7 +592,9 @@ def escrever_relatorio(P: Proposta, saida: Path, data_ref: str, fontes: dict):
         ("2. Abas Locatários e Locações: vieram do painel de locação. Pode corrigir células ou incluir linhas (ex.: contrato que não está no painel).", False),
         ("   Para incluir uma locação: placa, locatario_id (da aba Locatários), inicio (AAAA-MM-DD) e, se já terminou, fim.", False),
         ("3. A aba Veículos é só a prévia normalizada, para consulta: alterações nela são ignoradas. Corrija pelas Pendências.", False),
-        ("4. Salve este arquivo com o mesmo nome e rode: python3 scripts/carga_inicial/carga_previa.py aplicar", False),
+        ("4. Aba Ajustes (opcional): correções livres de campos do veículo, uma linha por campo. Ex.: placa BEK3H54 · campo marca_modelo · valor VOLKSWAGEN DELIVERY 9.170.", False),
+        (f"   Campos aceitos: {', '.join(CAMPOS_AJUSTAVEIS)}.", False),
+        ("5. Salve este arquivo com o mesmo nome e rode: python3 scripts/carga_inicial/carga_previa.py aplicar", False),
         ("", False),
         (f"Pendências: {cont['BLOQUEIA']} BLOQUEIA · {cont['CONFERIR']} CONFERIR · {cont['INFO']} INFO", True),
         (f"Veículos: {len(P.veiculos)} · Locatários: {len(P.locatarios)} · Locações: {len(P.locacoes)} · Filiais: {len(P.filiais)}", False),
@@ -611,6 +625,7 @@ def escrever_relatorio(P: Proposta, saida: Path, data_ref: str, fontes: dict):
     _aba(wb, "Locatários", COLS_LOCATARIOS, P.locatarios, {"nome": 40, "observacoes": 30})
     _aba(wb, "Locações", COLS_LOCACOES, P.locacoes, {"locatario_nome": 36, "observacoes": 50})
     _aba(wb, "Filiais", COLS_FILIAIS, P.filiais, {"observacoes": 50})
+    _aba(wb, "Ajustes", COLS_AJUSTES, [], {"valor": 40, "observacao": 40})
     caminho = saida / NOME_RELATORIO
     wb.save(caminho)
 
@@ -655,7 +670,8 @@ def ler_relatorio(caminho: Path):
             out.append({k: (iso(v) if isinstance(v, (dt.date, dt.datetime)) else (str(v).strip() if v is not None else None)) for k, v in zip(cab, r) if k})
         return out
 
-    return {"pendencias": linhas("Pendências"), "locatarios": linhas("Locatários"), "locacoes": linhas("Locações")}
+    return {"pendencias": linhas("Pendências"), "locatarios": linhas("Locatários"), "locacoes": linhas("Locações"),
+            "ajustes": linhas("Ajustes") if "Ajustes" in wb.sheetnames else []}
 
 
 def aplicar(P: Proposta, rel: dict, data_ref: str):
@@ -706,6 +722,34 @@ def aplicar(P: Proposta, rel: dict, data_ref: str):
         log[dec] += 1
 
     veiculos = [v for v in P.veiculos if v["veiculo_id"] not in excluir]
+    por_placa_aj = {v["placa_norm"]: v for v in veiculos if v["placa_norm"]}
+    for a in rel.get("ajustes", []):
+        v = por_placa_aj.get(normalizar_placa(a.get("placa")))
+        campo = (a.get("campo") or "").strip()
+        rot = f'Ajuste {a.get("placa")} {campo}'
+        if not v:
+            erros.append(f"{rot}: placa não está na carga")
+            continue
+        if campo not in CAMPOS_AJUSTAVEIS:
+            erros.append(f"{rot}: campo não ajustável (use um de: {', '.join(CAMPOS_AJUSTAVEIS)})")
+            continue
+        valor = a.get("valor")
+        if campo in ("ano_fabricacao", "ano_modelo") and valor not in (None, ""):
+            try:
+                valor = int(float(valor))
+            except ValueError:
+                erros.append(f"{rot}: ano inválido ({valor})")
+                continue
+        elif campo == "renavam":
+            valor = normalizar_renavam(valor)
+        elif campo == "cnpj_proprietario":
+            valor = formatar_cnpj(valor)
+        elif campo in ("tipo", "situacao", "uf_registro", "isento_ipva", "forma_pgto_ipva_padrao"):
+            valor = (valor or "").upper().strip() or None
+        elif campo == "placa":
+            valor = limpar_placa(valor)
+        v[campo] = valor if valor != "" else None
+        log["ajustes"] += 1
     for v in veiculos:
         v["categoria"] = CATEGORIA.get(v["tipo"])
         v["placa_norm"] = normalizar_placa(v["placa"])

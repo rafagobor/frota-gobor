@@ -377,4 +377,25 @@ O protocolo de multas descrito no §2.2 do prompt (Apps Script + planilha) já e
 
 **Teste de integração (simulado, com os dados reais, fora do repositório):** a aplicação com decisões de exemplo gerou CSVs que o importador validou com 0 erro e 0 aviso. Foram 211 veículos (1 excluído na simulação), 85 locações e 34 locatários. A multa do DER-SP de 03/10/2025 da FFK8022 aponta para a MND Serviços, o mesmo locatário da planilha antiga.
 
-**Critério de pronto da Fase 2:** os 212 veículos validados por você e a carga importada na base.
+**Decisões recebidas em 18/11 (aplicadas):**
+
+| Placa | Decisão |
+|---|---|
+| RLI4H26 | Aceitar o RENAVAM do painel: 01272808014 |
+| RDV8D31 / RDV8D51 | Manter os RENAVAMs da prévia |
+| BEK3H54 | TOCO; VOLKSWAGEN DELIVERY 9.170; fabricação 2021 (ano de modelo a confirmar no CRLV); Matriz |
+| NCK4696 | TOCO (Ford Cargo 815); Porto Velho (77.505.550/0003-59) |
+| EAL8193 | TOCO, alugado (conforme o painel) |
+| 9 "alugada" sem contrato vigente | **Continuam LOCADO_TERCEIRO**. Os contratos serão cadastrados no painel de locação. Até lá, multas dessas placas ficam sem locatário definido (aviso na carga) |
+| Demais CONFERIR | Sugestão aceita por padrão |
+
+**Resultado:**
+- 212 veículos: 156 em operação própria e 56 locados;
+- 34 locatários, 85 locações e 9 filiais;
+- 0 erro; 9 avisos esperados (as placas sem contrato).
+
+A validação no importador simulado também passou sem erros. CSVs em `dados/carga/importar/` (fora do git).
+
+**Para registrar (fora do escopo deste projeto):** a tarefa diária do painel de locação já tem uma parte que lê contratos de uma pasta do Drive ("PARTE 2 – CONTRATOS"). O que falta para as 9 placas é colocar os contratos nessa pasta, ou ajustar a rotina para alguma variação de documento que ela não reconhece.
+
+**Critério de pronto da Fase 2:** decisões ✅ (18/11). Importação na base ⏳: depende do setup na sua conta (runbook, passos 3 a 5 e 8.1).

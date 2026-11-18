@@ -236,6 +236,28 @@ class TestRelatorioEAplicacao(Base):
         self.assertTrue(all(l["veiculo_id"].startswith("V") and l["locatario_id"].startswith("LT") for l in locs))
         self.assertNotIn("placa", locs[0], "LOCACOES.csv só com colunas da tabela")
 
+    def test_ajustes_livres(self):
+        self.rodar("relatorio")
+        self.decidir({("RLI4H26", "renavam"): ("ACEITAR", None), ("EAL8193", "tipo"): ("ACEITAR", None),
+                      ("NCK4696", "tipo"): ("ACEITAR", None), ("NCK4696", "cnpj_proprietario"): ("ACEITAR", None)})
+        caminho = self.saida / C.NOME_RELATORIO
+        wb = openpyxl.load_workbook(caminho)
+        ws = wb["Ajustes"]
+        ws.append(["BEU1D91", "marca_modelo", "VOLKSWAGEN DELIVERY 9.170", ""])
+        ws.append(["BEU1D91", "ano_fabricacao", "2021", ""])
+        wb.save(caminho)
+        self.assertEqual(self.rodar("aplicar"), 0)
+        v = {x["placa"]: x for x in ler_csv(self.saida / "importar" / "VEICULOS.csv")}["BEU1D91"]
+        self.assertEqual((v["marca_modelo"], v["ano_fabricacao"]), ("VOLKSWAGEN DELIVERY 9.170", "2021"))
+        ws.append(["BEU1D91", "veiculo_id", "V9999", ""])
+        wb.save(caminho)
+        self.assertEqual(self.rodar("aplicar"), 1)
+        self.assertIn("campo não ajustável", (self.saida / "relatorio_aplicacao.md").read_text())
+
+    def test_marca_modelo_sem_repetir(self):
+        self.assertEqual(C.marca_modelo({"marca": "FORD", "modelo": "FORD CARGO 815"}), "FORD CARGO 815")
+        self.assertEqual(C.marca_modelo({"marca": "LIBRELATO", "modelo": "SR BTF"}), "LIBRELATO SR BTF")
+
     def test_locacao_incluida_a_mao_e_sobreposicao(self):
         self.rodar("relatorio")
         self.decidir({("RLI4H26", "renavam"): ("ACEITAR", None), ("EAL8193", "tipo"): ("ACEITAR", None),
