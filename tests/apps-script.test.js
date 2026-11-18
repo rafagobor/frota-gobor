@@ -92,6 +92,7 @@ test('setup aplica formatos, listas e proteções', () => {
     assert.equal(p.dominio, false);
   }
   const obr = amb.base.getSheetByName('OBRIGACOES');
+  assert.ok(obr.getMaxRows() >= 6000, 'capacidade para as obrigações do exercício');
   assert.equal(obr.formatos[obr.coluna('valor_pago')], '"R$" #,##0.00');
   const aud = amb.base.getSheetByName('AUDITORIA');
   assert.equal(aud.protecoes.length, 1);

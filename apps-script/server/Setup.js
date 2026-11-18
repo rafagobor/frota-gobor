@@ -27,6 +27,15 @@ var Setup = (function () {
   var COR_CABECALHO = '#1f3a5f';
   var CONGELAR_1A_COLUNA = ['VEICULOS', 'OBRIGACOES', 'MULTAS', 'MOTORISTAS'];
   var ABAS_PADRAO = ['Página1', 'Pagina1', 'Planilha1', 'Sheet1'];
+  /**
+   * Linhas mínimas por aba. Formatos, listas e proteções de coluna cobrem a aba inteira
+   * desde o início. Ex.: as obrigações de 2027 (≈210 veículos × parcelas) passam de 1.000.
+   */
+  var CAPACIDADE = {
+    OBRIGACOES: 6000, MULTAS: 3000, DOCUMENTOS: 3000, VALORES_VENAIS: 2000, CALENDARIO_VENCIMENTOS: 2000,
+    AUDITORIA: 5000, AUDITORIA_RESTRITA: 3000, LOG_EXECUCAO: 3000, SNAPSHOT_KPI: 5000, DESCONTOS_FOLHA: 2000,
+  };
+  var CAPACIDADE_PADRAO = 1000;
   var FORMATOS = {
     data: 'dd/mm/yyyy',
     datahora: 'dd/mm/yyyy hh:mm',
@@ -121,7 +130,8 @@ var Setup = (function () {
   }
 
   function formatarAba_(sh, def, cabecalho) {
-    if (sh.getMaxRows() < 2) sh.insertRowsAfter(1, 999);
+    var capacidade = CAPACIDADE[def.nome] || CAPACIDADE_PADRAO;
+    if (sh.getMaxRows() < capacidade) sh.insertRowsAfter(sh.getMaxRows(), capacidade - sh.getMaxRows());
     var nLinhas = sh.getMaxRows() - 1;
     var nCols = cabecalho.length;
     var cols = {};
