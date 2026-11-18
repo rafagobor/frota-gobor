@@ -1,0 +1,19 @@
+# dados reais da empresa: nunca versionar
+dados/
+*.xlsx
+*.csv
+!scripts/**/modelos/*.csv
+!core/tests/fixtures/*.csv
+
+# configuração local do clasp (cada pessoa aponta para o seu scriptId)
+.clasp.json
+.clasprc.json
+
+# gerado pelo build (npm run build)
+apps-script/server/00_core.js
+
+node_modules/
+__pycache__/
+*.pyc
+.env
+.DS_Store
