@@ -252,7 +252,7 @@ Responda pelo número. Exemplo: "Q6: cota única para todos; Q9: segue lista…"
 
 | # | Resposta | Efeito |
 |---|---|---|
-| N1 | Repositório `frota-gobor` criado (`rafagobor/frota-gobor`) | ⚠️ A conta do GitHub ligada às sessões do Claude ainda não tem permissão de escrita nele (ver "Pendências") |
+| N1 | Repositório `rafagobor/frota-gobor` | ✅ Conectado e com o código enviado em 18/11 (`main` e `fase-1-fundacao`) |
 | Q4 | Pastas num **Drive compartilhado**; **chave nova** da API | D-04 confirmada. A chave vai em Propriedades do Script na Fase 5 |
 | Q15 | rafael@gobor.com.br é ADMIN por enquanto | O setup cadastra quem o roda como primeiro ADMIN |
 | Q1, Q2, Q5–Q14, Q16, N5, N7, N8 | Sem objeção | Valem os padrões das seções 5 e 6. D-10 (calendário provisório) e D-15 (planilha restrita) aprovadas |
@@ -267,9 +267,9 @@ Responda pelo número. Exemplo: "Q6: cota única para todos; Q9: segue lista…"
 | 77.505.550/0008-63 | Cuiabá | MT | ativa | Sem veículos na prévia. MT entra nas tabelas de referência só se surgir veículo lá |
 | 77.505.550/0009-44 | Campo Largo | PR | ativa | |
 | 77.505.550/0012-40 | Araquari | SC | **encerrada** | Todas as placas passaram para a Matriz. Entra como inativa, para o histórico |
-| 77.505.550/0014-01 | *(a informar)* | GO | ativa | 21 carretas na prévia |
+| 77.505.550/0014-01 | Goiânia | GO | ativa | 21 carretas na prévia |
 | 77.505.550/0015-92 | Itajaí | SC | ativa | Os 25 veículos SC da prévia, inclusive o RDV8D51, que portanto **não** é ex-Araquari (Anexo A, item 5, resolvido) |
-| 39.247.088/0001-86 | *(a informar)* | PR | — | Dono de RHS1D66 e JBB1F79 (alugadas) |
+| 39.247.088/0001-86 | Gobor Seminovos | PR | ativa | Outra empresa do grupo. Dona de RHS1D66 e JBB1F79; é a locadora em 3 contratos do painel de locação |
 
 Todos os 9 CNPJs têm DV válido (testado em `core/tests/identificacao.test.js`).
 
@@ -277,13 +277,11 @@ Todos os 9 CNPJs têm DV válido (testado em `core/tests/identificacao.test.js`)
 
 ### Pendências que continuam abertas
 
-1. **Escrita no GitHub (N1).** O código da Fase 1 está pronto e com commit local, mas não consegui enviá-lo. A conta do GitHub conectada ao Claude não tem permissão de escrita em `rafagobor/frota-gobor`. Para resolver, escolha uma das opções:
-   - instalar o app do Claude no GitHub na conta `rafagobor`, com acesso a esse repositório, em claude.ai/connect-github;
-   - ou adicionar como colaboradora, com permissão de escrita, a conta do GitHub ligada ao Claude.
-2. **Nome da filial 77.505.550/0014-01 (GO).**
-3. **Quem é o CNPJ 39.247.088/0001-86.**
-4. **N6:** a automação antiga de multas está ativa? (risco atual, seção 3, A9)
-5. Itens que dependem do CRLV, tratados no Relatório de Saneamento (Fase 2): RLI4H26, RDV8D31/51, tipos de EAL8193/BEK3H54, dados do NCK4696.
+1. ~~Escrita no GitHub (N1)~~: resolvido em 18/11.
+2. ~~Nome da filial 77.505.550/0014-01~~: **Goiânia** (18/11).
+3. ~~CNPJ 39.247.088/0001-86~~: **Gobor Seminovos** (18/11).
+4. ~~N6~~: **resolvido** (18/11). A automação de multas está ativa: hoje é a tarefa agendada do Claude "Leitura de multas e contratos – Locação Gobor", que roda todo dia às 7h47 e grava no painel "Locação de Carretas Gobor". A planilha "Multas Frotas Alugadas" parou em agosto porque foi substituída por esse painel. O alerta A9 fica retirado. Ver seção 11.
+5. Itens que dependem do CRLV, tratados no Relatório de Saneamento (Fase 2): RDV8D31/51, tipo de BEK3H54. RLI4H26, EAL8193 e NCK4696 foram esclarecidos pelo painel de locação (seção 11).
 
 ---
 
@@ -307,3 +305,33 @@ Todos os 9 CNPJs têm DV válido (testado em `core/tests/identificacao.test.js`)
 - a planilha restrita tem a própria `AUDITORIA_RESTRITA` (D-15).
 
 **Critério de pronto:** testes passando ✅. Base criada na sua conta ⏳: siga `docs/runbook.md`, passos 0 a 7.
+
+---
+
+## 11. Descoberta: o painel "Locação de Carretas Gobor" (18/11/2026)
+
+O protocolo de multas descrito no §2.2 do prompt (Apps Script + planilha) já evoluiu. Hoje ele funciona assim:
+- **Tarefa agendada do Claude** "Leitura de multas e contratos – Locação Gobor": roda todo dia às 7h47 e lê duas pastas do Drive, a de multas ("[base claude] Multas Alugadas") e a de contratos.
+- **Painel (artefato do Claude) com banco próprio**, com as coleções `contratos` (54), `implementos` (52), `locatarios` (34, todos com CNPJ/CPF), `multas`, `boletos` e `config`. As locadoras são Transportadora Gobor (51 contratos) e Gobor Seminovos (3).
+
+**Cruzamento com a prévia (só leitura, nada foi alterado):**
+
+| Achado | Efeito |
+|---|---|
+| RENAVAM: 51 de 52 implementos batem com a prévia | Confirma a qualidade das duas fontes |
+| **RLI4H26**: o painel tem **01272808014** (DV válido) | É o candidato "faltou o último dígito" do achado A5. Pendência 1 do Anexo A resolvida, a confirmar no saneamento |
+| EAL8193: "Caminhão baú" VW 8.150E Delivery 2008/2009 | Tipo sugerido: TOCO (confirmar) |
+| NCK4696: "Caminhão baú" Ford Cargo 815 2003, locado | Tipo sugerido: TOCO; CNPJ sugerido: Porto Velho (RO, /0003-59) |
+| Dos 35 "alugada" da prévia, 30 estão no painel. **EWU0879, FEF7011, FFD6062, FOQ7799 e FPY3304 não estão** | Conferir no saneamento: devolvidos? contratos antigos fora do painel? |
+| **22 placas têm contrato no painel, mas não estão marcadas "alugada" na prévia** (ex.: ASX8D02, BAO2485/2486, BAO3786/3787, EWU2193/2194/2204, RLF7J46, RLH0A26, RLI4H26, TPP9C06…) | A coluna "alugada" da prévia está desatualizada. A situação LOCADO_TERCEIRO deve vir dos contratos vigentes |
+
+**Proposta para a Fase 2 (N10, a confirmar):**
+- LOCATARIOS e LOCACOES saem do painel de locação: locatário com CNPJ/CPF e, por placa, início e fim de cada contrato.
+- A situação do veículo vem do contrato vigente em 18/11/2026.
+- Assim você não precisa informar as datas das locações à mão, e a responsabilidade por multa na data da infração (§4.3) usa os mesmos contratos que o faturamento.
+
+**Questão de arquitetura para decidir antes da Fase 5 (N9):** o painel de locação já cobre locatários, contratos, boletos e multas dos veículos locados. Recomendação:
+- O painel de locação continua dono de **contratos, locatários e boletos**. A base da frota importa os contratos dele (um sentido só) e usa esses dados nos repasses e na responsabilidade por multas.
+- **Multas:** a base da frota é a fonte única da frota inteira (Q2 = sim, como no prompt). A rotina diária passa a gravar também na base da frota, ou é substituída pela ingestão da Fase 5. Até lá, os dois sistemas rodam em paralelo, sem desligar nada do que funciona.
+
+**Local da planilha base:** a "🚛 Frota Gobor — Base" (ID `1N4uITsqpREVmrBbDbJSmD9_QYBsQm8-olbXkYTi9mMk`) está na raiz do Meu Drive. A conta não mostra nenhum Drive compartilhado. Antes do setup, mova a planilha para a pasta onde a frota deve ficar, porque o setup cria a pasta de documentos ao lado dela.
