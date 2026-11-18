@@ -1,0 +1,22 @@
+{
+  "name": "frota-gobor",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Painel de Frota Gobor: IPVA, licenciamento, multas e motoristas (Google Sheets + Apps Script)",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "pretest": "node scripts/build.mjs",
+    "test": "node --test \"core/tests/*.test.js\" \"tests/*.test.js\"",
+    "build": "node scripts/build.mjs",
+    "check": "npm test && node scripts/checar-sintaxe.mjs",
+    "docs:modelo": "node scripts/gerar-modelo-dados.mjs",
+    "push": "npm run check && clasp push --force"
+  },
+  "devDependencies": {
+    "@google/clasp": "3.4.1",
+    "esbuild": "0.28.2"
+  }
+}

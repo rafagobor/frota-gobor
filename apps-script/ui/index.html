@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <base target="_top">
+  <meta charset="utf-8">
+  <title>Frota Gobor</title>
+  <?!= incluir_('ui/estilos') ?>
+</head>
+<body>
+  <header class="topo">
+    <button class="menu-botao" id="menuBotao" aria-label="Abrir menu" aria-expanded="false">☰</button>
+    <div class="marca">🚛 <strong>Frota Gobor</strong></div>
+    <label class="busca">
+      <span class="sr">Busca global</span>
+      <input id="busca" type="search" placeholder="Placa, AIT, MTO ou motorista (em breve)" disabled>
+    </label>
+    <div class="usuario" id="usuario">carregando…</div>
+  </header>
+  <div class="corpo">
+    <nav class="lateral" id="lateral" aria-label="Telas"></nav>
+    <main id="conteudo" class="conteudo" tabindex="-1">
+      <p class="mudo">Carregando…</p>
+    </main>
+  </div>
+  <footer class="rodape">Versão <?= versao ?> · dados no fuso America/Sao_Paulo</footer>
+  <?!= incluir_('ui/app') ?>
+</body>
+</html>

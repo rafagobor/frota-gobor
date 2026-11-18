@@ -1,0 +1,151 @@
+<script>
+  (function () {
+    'use strict';
+
+    // Telas do painel (prompt §7). `perfis` vazio = todos os perfis cadastrados.
+    var TELAS = [
+      { id: 'visao-geral', titulo: '🏠 Visão Geral', fase: '4', perfis: [] },
+      { id: 'agenda', titulo: '📅 Agenda', fase: '4', perfis: [] },
+      { id: 'ipva-licenciamento', titulo: '🧾 IPVA & Licenciamento', fase: '3', perfis: [] },
+      { id: 'multas', titulo: '🚨 Multas', fase: '5', perfis: [] },
+      { id: 'motoristas', titulo: '👷 Motoristas', fase: '6', perfis: ['ADMIN', 'FINANCEIRO', 'DP'] },
+      { id: 'folha', titulo: '💼 Folha do mês', fase: '6', perfis: ['ADMIN', 'FINANCEIRO', 'DP'] },
+      { id: 'veiculos', titulo: '🚛 Veículos', fase: '3', perfis: [] },
+      { id: 'locatarios', titulo: '🤝 Locatários & Repasses', fase: '8', perfis: [] },
+      { id: 'custos', titulo: '📊 Custos & Gerencial', fase: '4', perfis: [] },
+      { id: 'revisao', titulo: '📥 Fila de Revisão', fase: '5', perfis: ['ADMIN', 'FINANCEIRO'] },
+      { id: 'admin', titulo: '⚙️ Admin', fase: '1', perfis: ['ADMIN'] }
+    ];
+
+    var estado = { perfil: null, eu: null };
+
+    function el(tag, atributos, filhos) {
+      var e = document.createElement(tag);
+      Object.keys(atributos || {}).forEach(function (k) {
+        if (k === 'texto') e.textContent = atributos[k];
+        else if (k === 'classe') e.className = atributos[k];
+        else e.setAttribute(k, atributos[k]);
+      });
+      (filhos || []).forEach(function (f) { if (f) e.appendChild(typeof f === 'string' ? document.createTextNode(f) : f); });
+      return e;
+    }
+
+    function chamar(rota, args) {
+      return new Promise(function (resolve, reject) {
+        google.script.run
+          .withSuccessHandler(function (r) { (r && r.ok) ? resolve(r.dados) : reject(new Error(r ? r.erro : 'Sem resposta do servidor')); })
+          .withFailureHandler(function (e) { reject(e instanceof Error ? e : new Error(String(e))); })
+          .api(rota, args || {});
+      });
+    }
+
+    function numeroBR(n) {
+      return n === null || n === undefined ? '—' : Number(n).toLocaleString('pt-BR');
+    }
+
+    function dataBR(iso) {
+      return iso ? iso.split('-').reverse().join('/') : '';
+    }
+
+    function telasPermitidas() {
+      return TELAS.filter(function (t) { return !t.perfis.length || t.perfis.indexOf(estado.perfil) >= 0; });
+    }
+
+    function montarMenu(atual) {
+      var nav = document.getElementById('lateral');
+      nav.innerHTML = '';
+      telasPermitidas().forEach(function (t) {
+        var a = el('a', { href: '#/' + t.id }, [el('span', { texto: t.titulo }), el('span', { classe: 'fase', texto: 'F' + t.fase })]);
+        if (t.id === atual) a.setAttribute('aria-current', 'page');
+        nav.appendChild(a);
+      });
+    }
+
+    function conteudo() {
+      var c = document.getElementById('conteudo');
+      c.innerHTML = '';
+      return c;
+    }
+
+    function mostrarErro(mensagem) {
+      var c = conteudo();
+      c.appendChild(el('div', { classe: 'erro-caixa' }, [el('strong', { texto: 'Não foi possível carregar. ' }), document.createTextNode(mensagem)]));
+    }
+
+    function telaEmConstrucao(t) {
+      var c = conteudo();
+      c.appendChild(el('h1', { texto: t.titulo }));
+      c.appendChild(el('p', { classe: 'subtitulo', texto: 'Esta tela chega na Fase ' + t.fase + ' do projeto.' }));
+    }
+
+    function telaAdmin() {
+      var c = conteudo();
+      c.appendChild(el('h1', { texto: '⚙️ Admin' }));
+      c.appendChild(el('p', { classe: 'subtitulo', texto: 'Estado das tabelas da base. Cadastros, importadores e o assistente de exercício chegam nas próximas fases.' }));
+      var caixa = el('div', { classe: 'tabela-envoltorio' }, [el('p', { classe: 'mudo', texto: ' Carregando…' })]);
+      c.appendChild(caixa);
+      chamar('statusBase').then(function (d) {
+        var tbody = el('tbody');
+        d.tabelas.forEach(function (t) {
+          var selo = t.erro ? el('span', { classe: 'selo erro', texto: '✖ ' + t.erro }) : el('span', { classe: 'selo ok', texto: '✔ ok' });
+          tbody.appendChild(el('tr', {}, [
+            el('td', {}, [el('strong', { texto: t.nome }), el('div', { classe: 'mudo', texto: t.descricao })]),
+            el('td', { texto: t.planilha === 'MOTORISTAS' ? '🔒 Restrita' : 'Base' }),
+            el('td', { classe: 'num', texto: numeroBR(t.registros) }),
+            el('td', {}, [selo])
+          ]));
+        });
+        var tabela = el('table', {}, [
+          el('thead', {}, [el('tr', {}, [el('th', { texto: 'Tabela' }), el('th', { texto: 'Planilha' }), el('th', { texto: 'Registros' }), el('th', { texto: 'Situação' })])]),
+          tbody
+        ]);
+        caixa.innerHTML = '';
+        caixa.appendChild(tabela);
+      }).catch(function (e) { mostrarErro(e.message); });
+    }
+
+    function telaVisaoGeral() {
+      var c = conteudo();
+      c.appendChild(el('h1', { texto: '🏠 Visão Geral' }));
+      c.appendChild(el('p', { classe: 'subtitulo', texto: 'Hoje é ' + dataBR(estado.eu.hoje) + '. Os indicadores chegam na Fase 4.' }));
+      c.appendChild(el('div', { classe: 'aviso', texto: 'Fase 1 (fundação): a base está criada e o acesso por perfil funciona. A carga dos 212 veículos vem na Fase 2.' }));
+      var grade = el('div', { classe: 'grade' });
+      c.appendChild(grade);
+      chamar('statusBase').then(function (d) {
+        var mapa = {};
+        d.tabelas.forEach(function (t) { mapa[t.nome] = t.registros; });
+        [['Veículos', 'VEICULOS'], ['Obrigações', 'OBRIGACOES'], ['Multas', 'MULTAS'], ['Filiais', 'FILIAIS']].forEach(function (p) {
+          grade.appendChild(el('div', { classe: 'cartao' }, [el('div', { classe: 'rotulo', texto: p[0] }), el('div', { classe: 'valor', texto: numeroBR(mapa[p[1]]) })]));
+        });
+      }).catch(function (e) { mostrarErro(e.message); });
+    }
+
+    function rotear() {
+      var id = (location.hash || '#/visao-geral').replace('#/', '');
+      var t = telasPermitidas().filter(function (x) { return x.id === id; })[0] || telasPermitidas()[0];
+      montarMenu(t.id);
+      document.getElementById('lateral').classList.remove('aberta');
+      if (t.id === 'visao-geral') telaVisaoGeral();
+      else if (t.id === 'admin') telaAdmin();
+      else telaEmConstrucao(t);
+      document.getElementById('conteudo').focus();
+    }
+
+    document.getElementById('menuBotao').addEventListener('click', function () {
+      var nav = document.getElementById('lateral');
+      var aberta = nav.classList.toggle('aberta');
+      this.setAttribute('aria-expanded', aberta ? 'true' : 'false');
+    });
+
+    chamar('meuPerfil').then(function (eu) {
+      estado.eu = eu;
+      estado.perfil = eu.perfil;
+      document.getElementById('usuario').textContent = eu.email + ' · ' + eu.perfil;
+      window.addEventListener('hashchange', rotear);
+      rotear();
+    }).catch(function (e) {
+      document.getElementById('usuario').textContent = '';
+      mostrarErro(e.message);
+    });
+  })();
+</script>
