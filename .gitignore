@@ -4,6 +4,7 @@ dados/
 *.csv
 !scripts/**/modelos/*.csv
 !core/tests/fixtures/*.csv
+!referencias/**/*.csv
 
 # .clasp.json é versionado: aponta para o script da planilha "🚛 Frota Gobor — Base"
 .clasprc.json
