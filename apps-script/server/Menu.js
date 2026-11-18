@@ -13,6 +13,7 @@ function onOpen() {
     .addSubMenu(ui.createMenu('Admin')
       .addItem('Criar/validar base', 'criarOuValidarBase')
       .addItem('Reaplicar formatos e proteções', 'criarOuValidarBaseForcado')
+      .addItem('Importar CSVs da pasta 📤 Importação…', 'menuImportarCsv')
       .addItem('Testar meu acesso', 'menuTestarAcesso')
       .addItem('Sobre', 'menuSobre'))
     .addToUi();

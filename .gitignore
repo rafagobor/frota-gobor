@@ -5,8 +5,7 @@ dados/
 !scripts/**/modelos/*.csv
 !core/tests/fixtures/*.csv
 
-# configuração local do clasp (cada pessoa aponta para o seu scriptId)
-.clasp.json
+# .clasp.json é versionado: aponta para o script da planilha "🚛 Frota Gobor — Base"
 .clasprc.json
 
 # gerado pelo build (npm run build)

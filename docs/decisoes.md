@@ -335,3 +335,46 @@ O protocolo de multas descrito no §2.2 do prompt (Apps Script + planilha) já e
 - **Multas:** a base da frota é a fonte única da frota inteira (Q2 = sim, como no prompt). A rotina diária passa a gravar também na base da frota, ou é substituída pela ingestão da Fase 5. Até lá, os dois sistemas rodam em paralelo, sem desligar nada do que funciona.
 
 **Local da planilha base:** a "🚛 Frota Gobor — Base" (ID `1N4uITsqpREVmrBbDbJSmD9_QYBsQm8-olbXkYTi9mMk`) está na raiz do Meu Drive. A conta não mostra nenhum Drive compartilhado. Antes do setup, mova a planilha para a pasta onde a frota deve ficar, porque o setup cria a pasta de documentos ao lado dela.
+
+---
+
+## 12. Fase 2 (Carga inicial): em andamento desde 18/11/2026
+
+**Decisões aprovadas em 18/11:**
+- **N9**: o painel de locação continua dono de contratos, locatários e boletos. A base da frota importa os contratos dele e passa a ser a fonte única das multas da frota inteira. Os dois sistemas rodam em paralelo até a validação.
+- **N10**: LOCATARIOS e LOCACOES saem do painel de locação. A situação do veículo vem do contrato vigente na data de referência.
+
+**Novas decisões técnicas:**
+
+| # | Decisão | Motivo |
+|---|---|---|
+| D-18 | O script de carga é em Python (como pede o prompt) e repete as regras de placa, RENAVAM e CNPJ do núcleo. **Quem decide é o importador do Apps Script**, que revalida tudo com o núcleo JS antes de gravar | A carga roda local, com openpyxl, mas a base só aceita o que passar no mesmo validador usado no resto do sistema |
+| D-19 | Locações calculadas com a mesma regra do painel de locação. O fim de cada item é o primeiro entre: devolução, substituição, encerramento, véspera do próximo contrato da placa ou, sem renovação automática, o fim do contrato. A cessão de contrato divide a locação por locatário responsável | Responsabilidade por multa na data da infração (§4.3) coerente com o faturamento |
+| D-20 | LOCATARIOS e LOCACOES ganharam a coluna `ref_painel` (id do locatário; contrato#item) | Permite sincronizar com o painel depois (N9) sem duplicar |
+| D-21 | Importação por CSV da pasta "📤 Importação" é tudo ou nada, com confirmação e reimportação idempotente | Uma carga parcial deixaria a base inconsistente |
+| D-22 | `.clasp.json` versionado (um único script, o da planilha base) | Simplifica o runbook |
+
+**Relatório de Saneamento (dados reais, data de referência 18/11/2026):**
+- 212 veículos, 34 locatários, 85 locações, 9 filiais.
+- Pendências: **7 BLOQUEIA**, 49 CONFERIR e 14 INFO.
+
+| BLOQUEIA (decisão obrigatória) | Sugestão |
+|---|---|
+| RLI4H26: DV do RENAVAM inválido | 01272808014 (painel de locação) |
+| RDV8D31 / RDV8D51: RENAVAMs possivelmente trocados | Conferir no CRLV |
+| EAL8193: sem tipo | TOCO (painel: caminhão baú VW 8.150E) |
+| BEK3H54: sem tipo | (sem fonte: informar) |
+| NCK4696: sem tipo e sem CNPJ | TOCO; 77.505.550/0003-59 (Porto Velho) |
+
+**CONFERIR** (sem decisão, vale a sugestão):
+- 21 placas com contrato no painel, mas sem "alugada" na prévia → LOCADO_TERCEIRO;
+- 9 placas "alugada" sem contrato vigente → OPERACAO_PROPRIA. São elas:
+  - EWJ9230 e EWU4057: o contrato 028/2025 terminou em 05/07/2026;
+  - EWJ9801 e EWJ9802: o contrato 015/2025 terminou em 15/07/2026;
+  - EWU0879, FEF7011, FFD6062, FOQ7799 e FPY3304: nunca estiveram no painel;
+- 18 ex-Araquari: confirmar a transferência no CRLV;
+- RHD0D44: SAVEIRO → UTILITARIO.
+
+**Teste de integração (simulado, com os dados reais, fora do repositório):** a aplicação com decisões de exemplo gerou CSVs que o importador validou com 0 erro e 0 aviso. Foram 211 veículos (1 excluído na simulação), 85 locações e 34 locatários. A multa do DER-SP de 03/10/2025 da FFK8022 aponta para a MND Serviços, o mesmo locatário da planilha antiga.
+
+**Critério de pronto da Fase 2:** os 212 veículos validados por você e a carga importada na base.

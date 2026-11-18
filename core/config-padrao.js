@@ -23,6 +23,7 @@ export const CONFIG_PADRAO = [
   ['PASTA_LICENCIAMENTO_ID', '', 'ID_DRIVE', 'Licenciamento/{AAAA}/'],
   ['PASTA_CRLV_ID', '', 'ID_DRIVE', 'CRLV/{AAAA}/'],
   ['PASTA_COMPROVANTES_ID', '', 'ID_DRIVE', 'Comprovantes/{AAAA}/{MM}/'],
+  ['PASTA_IMPORTACAO_ID', '', 'ID_DRIVE', '📤 Importação: CSVs da carga inicial e de importações em lote'],
   ['PASTA_MOTORISTAS_ID', '', 'ID_DRIVE', 'Motoristas/{NOME}/ (acesso restrito)'],
   // Prazos e alertas
   ['DIAS_ALERTA_VENCIMENTO', '7', 'NUMERO', 'Janela do "vence em breve" das obrigações'],

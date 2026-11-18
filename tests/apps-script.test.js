@@ -58,7 +58,7 @@ test('setup cria a base completa na primeira execução', () => {
   // Pastas: estrutura no Drive compartilhado; documentos de motoristas fora dele
   const raiz = amb.driveCompartilhado.filhos.find((f) => f.nome === '🚛 Frota Gobor — Documentos');
   assert.ok(raiz);
-  igual(raiz.filhos.map((f) => f.nome), ['📥 Entrada', '⚠️ Revisão', '❌ Erros', '🔁 Duplicados', 'Multas', 'IPVA', 'Licenciamento', 'CRLV', 'Comprovantes']);
+  igual(raiz.filhos.map((f) => f.nome), ['📥 Entrada', '⚠️ Revisão', '❌ Erros', '🔁 Duplicados', 'Multas', 'IPVA', 'Licenciamento', 'CRLV', 'Comprovantes', '📤 Importação']);
   assert.ok(amb.meuDrive.filhos.some((f) => f.nome === '🔒 Motoristas — documentos'));
 
   // Primeiro ADMIN
@@ -255,4 +255,84 @@ test('menu, painel e setup pela interface', () => {
   g.menuAbrirPainel();
   assert.equal(amb.alertas.at(-1)[0], 'Painel ainda não implantado');
   assert.equal(g.doGet().titulo, 'Frota Gobor');
+});
+
+function csv(linhas) {
+  return linhas.map((l) => l.map((v) => `"${String(v).replace(/"/g, '""')}"`).join(',')).join('\n') + '\n';
+}
+
+const CSV_FILIAIS = [['cnpj', 'nome_curto', 'razao_social', 'uf', 'municipio', 'ativo', 'observacoes'],
+  ['77.505.550/0001-97', 'Matriz', '', 'PR', '', 'S', ''], ['77.505.550/0003-59', 'Porto Velho', '', 'RO', '', 'S', '']];
+const CSV_LOCATARIOS = [['locatario_id', 'nome', 'cnpj_cpf', 'contato', 'email', 'telefone', 'ativo', 'observacoes', 'ref_painel'],
+  ['LT0001', 'MND SERVICOS', '39.247.088/0001-86', '', 'contato@exemplo.com', '', 'S', '', 'mnd']];
+const CSV_VEICULOS = [['veiculo_id', 'renavam', 'placa', 'chassi', 'tipo', 'marca_modelo', 'ano_fabricacao', 'ano_modelo', 'cnpj_proprietario', 'uf_registro', 'situacao', 'observacoes'],
+  ['V0001', '01251100403', 'BEU1D91', '', 'CAVALO', '', '', '', '77.505.550/0001-97', 'PR', 'OPERACAO_PROPRIA', ''],
+  ['V0002', '00808688731', 'NCK4696', '9BF', 'TOCO', 'FORD CARGO 815', '2003', '2003', '77.505.550/0003-59', 'RO', 'LOCADO_TERCEIRO', 'teste']];
+const CSV_LOCACOES = [['locacao_id', 'veiculo_id', 'locatario_id', 'inicio', 'fim', 'contrato_ref', 'repassa_multas', 'repassa_licenciamento', 'repassa_ipva', 'observacoes', 'ref_painel'],
+  ['LC00001', 'V0002', 'LT0001', '2026-10-01', '', 'Contrato 050/2026', 'S', 'N', 'N', '', 'c050-2026#0']];
+
+function colocarCsvs(amb, g, conjunto) {
+  const pasta = amb.pastas[g.Config.obter('PASTA_IMPORTACAO_ID')];
+  for (const [nome, linhas] of Object.entries(conjunto)) pasta.createFile(`${nome}.csv`, '﻿' + csv(linhas));
+  return pasta;
+}
+
+test('importação de CSV: valida, confirma, grava com auditoria e renomeia os arquivos', () => {
+  const { amb, g } = comSetup();
+  const pasta = colocarCsvs(amb, g, { FILIAIS: CSV_FILIAIS, LOCATARIOS: CSV_LOCATARIOS, VEICULOS: CSV_VEICULOS, LOCACOES: CSV_LOCACOES });
+  g.menuImportarCsv();
+  const confirmacao = amb.alertas.find((a) => a[0] === 'Confirmar importação');
+  assert.ok(confirmacao, JSON.stringify(amb.alertas.at(-1)));
+  assert.match(confirmacao[1], /VEICULOS: 2 registro\(s\) · 2 novo\(s\)/);
+  assert.equal(amb.alertas.at(-1)[0], 'Importação concluída');
+
+  const veic = g.Db.porChave('VEICULOS');
+  assert.equal(veic.V0001.placa_norm, 'BEU1391');
+  assert.equal(veic.V0002.renavam, '00808688731');
+  assert.equal(veic.V0002.ano_modelo, 2003);
+  assert.equal(g.Db.contar('FILIAIS'), 2);
+  assert.equal(g.Db.porChave('LOCACOES').LC00001.inicio, '2026-10-01');
+  assert.equal(g.Db.porChave('LOCATARIOS').LT0001.ref_painel, 'mnd');
+  const aud = g.Db.lerTodos('AUDITORIA').filter((a) => a.origem === 'IMPORTACAO');
+  assert.equal(aud.length, 2 + 1 + 2 + 1);
+  assert.ok(pasta.arquivos.every((f) => f.nome.startsWith('[importado ')));
+  const log = g.Db.lerTodos('LOG_EXECUCAO').filter((l) => l.rotina === 'IMPORTACAO_CSV');
+  assert.equal(log.length, 1);
+  assert.equal(JSON.parse(log[0].contagens_json).VEICULOS.inseridos, 2);
+});
+
+test('importação de CSV: erro bloqueia tudo; recusar não grava; repetir não duplica', () => {
+  const { amb, g } = comSetup();
+  const ruim = [CSV_VEICULOS[0], CSV_VEICULOS[1], ['V0003', '00127280801', 'RLI4H26', '', 'CARRETA', '', '', '', '77.505.550/0001-97', 'PR', 'OPERACAO_PROPRIA', '']];
+  const pasta = colocarCsvs(amb, g, { FILIAIS: CSV_FILIAIS, VEICULOS: ruim });
+  g.menuImportarCsv();
+  assert.equal(amb.alertas.at(-1)[0], 'Importação bloqueada: nada foi gravado');
+  assert.match(amb.alertas.at(-1)[1], /RENAVAM inválido/);
+  assert.equal(g.Db.contar('VEICULOS'), 0);
+  assert.equal(g.Db.contar('FILIAIS'), 0, 'nem as filiais (válidas) são gravadas');
+
+  pasta.arquivos.length = 0;
+  colocarCsvs(amb, g, { FILIAIS: CSV_FILIAIS });
+  amb.estado.respostaUi = 'NO';
+  g.menuImportarCsv();
+  assert.equal(g.Db.contar('FILIAIS'), 0, 'resposta NÃO: nada gravado');
+
+  amb.estado.respostaUi = 'YES';
+  g.menuImportarCsv();
+  assert.equal(g.Db.contar('FILIAIS'), 2);
+  pasta.arquivos.length = 0;
+  colocarCsvs(amb, g, { FILIAIS: CSV_FILIAIS });
+  g.menuImportarCsv();
+  assert.equal(g.Db.contar('FILIAIS'), 2, 'reimportar não duplica');
+  assert.match(amb.alertas.at(-1)[1], /0 inserido\(s\), 0 atualizado\(s\), 2 sem mudança/);
+});
+
+test('importação exige ADMIN', () => {
+  const { amb, g } = comSetup();
+  g.Db.inserir('USUARIOS', [{ email: 'fin@gobor.com.br', perfil: 'FINANCEIRO', ativo: 'S' }]);
+  g.Auth.limparCache();
+  amb.estado.usuario = 'fin@gobor.com.br';
+  g.menuImportarCsv();
+  assert.equal(amb.alertas.at(-1)[0], 'Erro na importação');
+  assert.match(amb.alertas.at(-1)[1], /não permite/);
 });

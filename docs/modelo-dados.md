@@ -208,6 +208,7 @@ Clientes que alugam veículos da Gobor. Planilha: **BASE** · chave: `locatario_
 | `telefone` | texto |  |  |
 | `ativo` | sn |  |  |
 | `observacoes` | texto_longo |  |  |
+| `ref_painel` | texto |  | Id do locatário no painel "Locação de Carretas Gobor" (decisão N9) |
 | `criado_em` | datahora | calc. | Preenchido pelo sistema |
 | `atualizado_em` | datahora | calc. | Preenchido pelo sistema |
 | `atualizado_por` | email | calc. | E-mail de quem fez a última alteração |
@@ -228,6 +229,7 @@ Vigência veículo ↔ locatário (fim vazio = vigente). Planilha: **BASE** · c
 | `repassa_licenciamento` | sn |  |  |
 | `repassa_ipva` | sn |  |  |
 | `observacoes` | texto_longo |  |  |
+| `ref_painel` | texto |  | Contrato#item no painel "Locação de Carretas Gobor" (decisão N9) |
 | `criado_em` | datahora | calc. | Preenchido pelo sistema |
 | `atualizado_em` | datahora | calc. | Preenchido pelo sistema |
 | `atualizado_por` | email | calc. | E-mail de quem fez a última alteração |

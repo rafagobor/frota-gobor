@@ -26,6 +26,7 @@ dados/                  arquivos reais da empresa (fora do git)
 | `npm test` | Gera o bundle do núcleo e roda todos os testes |
 | `npm run check` | Testes + verificação de sintaxe do Apps Script |
 | `npm run push` | `check` + envia o código para o Apps Script (`clasp push`) |
+| `npm run test:py` | Testes do script de carga inicial (Python) |
 | `npm run docs:modelo` | Regenera `docs/modelo-dados.md` a partir de `core/schema.js` |
 
 ## Documentação

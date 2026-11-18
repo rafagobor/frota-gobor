@@ -18,19 +18,29 @@ function iterador(lista) {
 export function criarAmbiente({ usuario = 'rafael@gobor.com.br', proprietario = 'rafael@gobor.com.br' } = {}) {
   let seq = 0;
   const novoId = (p) => `${p}-${++seq}`;
-  const estado = { usuario, proprietario };
+  const estado = { usuario, proprietario, respostaUi: 'YES' };
   const planilhas = {}, pastas = {}, arquivos = {};
   const props = {}, cache = {};
   const lock = { preso: false };
   const alertas = [];
   const menus = [];
 
+  class File {
+    constructor(nome, conteudo) { this.id = novoId('arquivo'); this.nome = nome; this.conteudo = conteudo; }
+    getId() { return this.id; }
+    getName() { return this.nome; }
+    setName(n) { this.nome = n; return this; }
+    getBlob() { return { getDataAsString: () => this.conteudo }; }
+  }
+
   class Folder {
-    constructor(nome) { this.id = novoId('pasta'); this.nome = nome; this.filhos = []; pastas[this.id] = this; }
+    constructor(nome) { this.id = novoId('pasta'); this.nome = nome; this.filhos = []; this.arquivos = []; pastas[this.id] = this; }
     getId() { return this.id; }
     getName() { return this.nome; }
     createFolder(n) { const f = new Folder(n); this.filhos.push(f); return f; }
     getFoldersByName(n) { return iterador(this.filhos.filter((f) => f.nome === n)); }
+    createFile(nome, conteudo) { const f = new File(nome, conteudo); this.arquivos.push(f); return f; }
+    getFilesByName(n) { return iterador(this.arquivos.filter((f) => f.nome === n)); }
   }
   const meuDrive = new Folder('Meu Drive');
   const driveCompartilhado = new Folder('Frota (Drive compartilhado)');
@@ -171,9 +181,10 @@ export function criarAmbiente({ usuario = 'rafael@gobor.com.br', proprietario = 
 
   const ui = {
     createMenu: cadeiaMenu,
-    alert: (...args) => { alertas.push(args); },
+    alert: (...args) => { alertas.push(args); return args[2] === 'YES_NO' ? estado.respostaUi : 'OK'; },
     showModelessDialog: () => {},
-    ButtonSet: { OK: 'OK' },
+    ButtonSet: { OK: 'OK', YES_NO: 'YES_NO' },
+    Button: { YES: 'YES', NO: 'NO', OK: 'OK' },
   };
 
   const pad = (n, w = 2) => String(n).padStart(w, '0');
@@ -194,6 +205,25 @@ export function criarAmbiente({ usuario = 'rafael@gobor.com.br', proprietario = 
       return new Date(Date.UTC(pos.yyyy, (pos.MM || 1) - 1, pos.dd || 1, pos.HH || 0, pos.mm || 0, pos.ss || 0) - OFFSET_SP_MS);
     },
     getUuid: () => randomUUID(),
+    /** CSV RFC 4180 (aspas duplas, vírgula, quebras dentro de aspas). */
+    parseCsv(texto) {
+      const linhas = []; let linha = [], campo = '', aspas = false;
+      for (let i = 0; i < texto.length; i++) {
+        const ch = texto[i];
+        if (aspas) {
+          if (ch === '"' && texto[i + 1] === '"') { campo += '"'; i++; }
+          else if (ch === '"') aspas = false;
+          else campo += ch;
+        } else if (ch === '"') aspas = true;
+        else if (ch === ',') { linha.push(campo); campo = ''; }
+        else if (ch === '\n' || ch === '\r') {
+          if (ch === '\r' && texto[i + 1] === '\n') i++;
+          linha.push(campo); linhas.push(linha); linha = []; campo = '';
+        } else campo += ch;
+      }
+      if (campo !== '' || linha.length) { linha.push(campo); linhas.push(linha); }
+      return linhas;
+    },
   };
 
   const logs = [];

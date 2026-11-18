@@ -27,17 +27,13 @@ cd frota-gobor && npm ci
 
 ## 3. Conectar o clasp
 
-1. Faça login. O navegador abre: entre com **rafael@gobor.com.br** e autorize.
+Faça login. O navegador abre: entre com **rafael@gobor.com.br** e autorize.
 
-   ```bash
-   npx clasp login
-   ```
+```bash
+npx clasp login
+```
 
-2. Crie o arquivo de configuração local e cole o ID do script no lugar de `COLE_AQUI_O_ID_DO_SCRIPT`:
-
-   ```bash
-   cp .clasp.json.exemplo .clasp.json
-   ```
+O arquivo `.clasp.json` já vem no repositório apontando para o script da planilha base (ID `16sfO21GTyB9pCraFSYZq8Mj3RD7A1qppa-TrwAoSPKNFEudCMB4yRPLQ`). Não é preciso criar nada.
 
 ## 4. Enviar o código
 
@@ -105,6 +101,34 @@ A planilha **🔒 Frota Gobor — Motoristas** e a pasta **🔒 Motoristas — d
      ```bash
      npx clasp update-deployment ID_DA_IMPLANTACAO -d "Fase N"
      ```
+
+## 8.1 Carga inicial (Fase 2)
+
+1. **Relatório de Saneamento.** Gerado a partir da aba "previa 2027" e dos contratos do painel de locação:
+
+   ```bash
+   python3 scripts/carga_inicial/carga_previa.py relatorio
+   ```
+
+   Entradas: `dados/Controle_IPVA_LICENCIAMENTO_2026.xlsx` e `dados/painel_locacao/` (exportação do painel). Saída: `dados/carga/Relatorio_Saneamento.xlsx`.
+2. **Decisões.** Na aba **Pendências**, preencha a coluna `decisao`. Toda linha **BLOQUEIA** precisa de decisão. Se quiser, ajuste as abas **Locatários** e **Locações**. As instruções estão na aba LEIA-ME.
+3. **Aplicar.** Gera os CSVs finais em `dados/carga/importar/`, ou lista o que ainda falta decidir:
+
+   ```bash
+   python3 scripts/carga_inicial/carga_previa.py aplicar
+   ```
+
+4. **Importar na base.** Envie os 4 CSVs (FILIAIS, LOCATARIOS, VEICULOS, LOCACOES) para a pasta **📤 Importação** no Drive. Depois: **🚛 Frota → Admin → Importar CSVs da pasta 📤 Importação…**.
+   - O sistema valida tudo e mostra um resumo.
+   - Com qualquer erro, nada é gravado.
+   - Se estiver tudo certo, você confirma e os arquivos são renomeados com "[importado AAAA-MM-DD]".
+   - Repetir a importação não duplica nada.
+
+Os testes do script rodam com:
+
+```bash
+python3 -m unittest discover -s scripts/carga_inicial
+```
 
 ## 9. Usuários e perfis
 

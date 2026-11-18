@@ -17,5 +17,6 @@ export * as schema from './schema.js';
 export * as tabela from './tabela.js';
 export * as veiculos from './veiculos.js';
 export * as config from './config-padrao.js';
+export * as importacao from './importacao.js';
 
-export const VERSAO = '0.1.0';
+export const VERSAO = '0.2.0';

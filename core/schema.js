@@ -288,6 +288,7 @@ export const TABELAS = [
       c('telefone', 'texto'),
       c('ativo', 'sn'),
       c('observacoes', 'texto_longo'),
+      c('ref_painel', 'texto', { descricao: 'Id do locatário no painel "Locação de Carretas Gobor" (decisão N9)' }),
     ],
   }),
   t({
@@ -303,6 +304,7 @@ export const TABELAS = [
       c('repassa_licenciamento', 'sn'),
       c('repassa_ipva', 'sn'),
       c('observacoes', 'texto_longo'),
+      c('ref_painel', 'texto', { descricao: 'Contrato#item no painel "Locação de Carretas Gobor" (decisão N9)' }),
     ],
   }),
   t({

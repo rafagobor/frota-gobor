@@ -284,6 +284,7 @@ var Setup = (function () {
       ['PASTA_LICENCIAMENTO_ID', 'Licenciamento'],
       ['PASTA_CRLV_ID', 'CRLV'],
       ['PASTA_COMPROVANTES_ID', 'Comprovantes'],
+      ['PASTA_IMPORTACAO_ID', '📤 Importação'],
     ].forEach(function (p) {
       if (Config.obter(p[0])) return;
       var pasta = subpasta_(raiz, p[1]);
