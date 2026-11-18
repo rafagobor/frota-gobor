@@ -399,3 +399,34 @@ A validação no importador simulado também passou sem erros. CSVs em `dados/ca
 **Para registrar (fora do escopo deste projeto):** a tarefa diária do painel de locação já tem uma parte que lê contratos de uma pasta do Drive ("PARTE 2 – CONTRATOS"). O que falta para as 9 placas é colocar os contratos nessa pasta, ou ajustar a rotina para alguma variação de documento que ela não reconhece.
 
 **Critério de pronto da Fase 2:** decisões ✅ (18/11). Importação na base ⏳: depende do setup na sua conta (runbook, passos 3 a 5 e 8.1).
+
+---
+
+## 13. Fase 3 (Exercício 2027): parte 1 entregue em 18/11/2026
+
+**Decisões do usuário (18/11):**
+- **Q6:** a forma de pagamento do IPVA será decidida em janeiro de 2027. Até lá, a geração usa **COTA_UNICA** (CONFIG `FORMA_PGTO_IPVA_PADRAO`).
+  - No PR, a cota única e a 1ª parcela vencem no mesmo dia, então as datas de alerta não mudam.
+  - Para trocar depois, basta mudar o padrão ou a forma do veículo e gerar de novo: as parcelas não pagas são refeitas.
+- **Q7/Q8:** não há exportação do ERP. As estimativas de IPVA dependem de valores venais (VALORES_VENAIS, importável por placa) ou das guias. Por isso a leitura de guias (Fase 7) passa a ser a fonte principal.
+
+**Novas decisões técnicas:**
+
+| # | Decisão |
+|---|---|
+| D-23 | O motor de geração (`core/exercicio.js`) é guiado só pelas tabelas. Faltou regra, faltou estimativa: entra em **pendência** (SEM_ALIQUOTA, SEM_CALENDARIO, SEM_TAXA, SEM_VALOR_VENAL, CONFLITO). Sem regra de alíquota, não gera IPVA |
+| D-24 | Idempotência: obrigação **travada** (paga, lançada no ERP, com guia, isenta, cancelada, bloqueada) nunca é alterada. As outras têm vencimento e estimativa recalculados. Parcelas que deixaram de existir são **canceladas**, ou viram CONFLITO se estiverem travadas. A observação "provisório" é a única que o sistema troca sozinho |
+| D-25 | Implementos com `tributado = N` não geram IPVA (nenhuma linha), só licenciamento |
+| D-26 | Responsável pelo pagamento: locatário quando há locação vigente no vencimento com repasse marcado (`repassa_ipva` / `repassa_licenciamento`); senão, a Gobor |
+| D-27 | Tabelas de referência públicas versionadas em `referencias/AAAA/` e geradas por script. Feriados para projeção: nacionais e calendário bancário de 2027 |
+| D-28 | Ambiente "frota-gobor" (pessoal) com acesso aos sites oficiais (SEFAZ, DETRAN e legislação de SP, PR, SC, GO e RO; Planalto e gov.br) e `npm ci` no setup |
+
+**Prévia com a frota real (simulada, 18/11):**
+- 295 obrigações: **83 de IPVA**, todas sem estimativa por falta de valor venal, e **212 de licenciamento**, estimadas em R$ 24.351,51 (22 sem taxa: GO e RO).
+- 129 implementos não tributados (regra a confirmar).
+- Pendências: 2 de calendário (RO).
+
+**Perguntas abertas:**
+1. **Carretas e semirreboques pagam IPVA** em alguma UF da frota? (hoje: não)
+2. **Alíquota do cavalo no PR:** 1% ou 1,9%? Basta ver uma guia de IPVA 2026 de um cavalo do PR.
+3. **GO e RO:** valor da taxa de licenciamento (um boleto de 2026 serve) e calendário de RO (NCK4696).

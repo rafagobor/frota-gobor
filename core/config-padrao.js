@@ -42,6 +42,7 @@ export const CONFIG_PADRAO = [
   ['PONTOS_LIMITE_2_GRAVISSIMAS', '20', 'NUMERO', 'Limite de pontos em 12 meses com 2 ou mais gravíssimas (conferir regra vigente)'],
   ['PONTOS_LIMITE_EAR', '40', 'NUMERO', 'Limite para quem exerce atividade remunerada (EAR) (conferir regra vigente)'],
   // Custos
+  ['FORMA_PGTO_IPVA_PADRAO', 'COTA_UNICA', 'TEXTO', 'Forma usada na geração quando o veículo não tem forma própria (COTA_UNICA ou PARCELADO). Provisória até a decisão de janeiro/2027'],
   ['FATOR_DEPRECIACAO_VENAL', '', 'NUMERO', 'Fator para projetar o valor venal do ano seguinte (ex.: 0,92). Vazio = sem projeção'],
   // API do Claude (Fase 5). A chave fica em Propriedades do Script, nunca aqui.
   ['API_MODELO', 'claude-sonnet-5-5', 'TEXTO', 'Modelo usado na leitura de documentos'],

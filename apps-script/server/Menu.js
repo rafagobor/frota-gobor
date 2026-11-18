@@ -43,7 +43,6 @@ function emBreve_(funcao, fase) {
 }
 
 function menuProcessarDocumentos() { emBreve_('Processar documentos', 'Fase 5'); }
-function menuGerarExercicio() { emBreve_('Gerar exercício', 'Fase 3'); }
 function menuEnviarResumo() { emBreve_('Enviar resumo', 'Fase 8'); }
 
 function menuTestarAcesso() {

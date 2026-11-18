@@ -11,9 +11,11 @@ import { tabela } from './schema.js';
 import { chaveRegistro, coerirValor, validarRegistro } from './tabela.js';
 import { completarVeiculo, validarVeiculo } from './veiculos.js';
 import { validarLocacoes } from './locacao.js';
+import { normalizarPlaca } from './placa.js';
 
 /** Ordem de gravação: referências antes de quem as usa. */
-export const ORDEM_IMPORTACAO = ['FILIAIS', 'LOCATARIOS', 'VEICULOS', 'LOCACOES'];
+export const ORDEM_IMPORTACAO = ['FILIAIS', 'LOCATARIOS', 'VEICULOS', 'LOCACOES',
+  'CALENDARIO_VENCIMENTOS', 'ALIQUOTAS_IPVA', 'TAXAS_LICENCIAMENTO', 'VALORES_VENAIS'];
 
 function vazio(v) {
   return v === null || v === undefined || String(v).trim() === '';
@@ -50,6 +52,25 @@ export function matrizParaRegistros(nomeTabela, matriz) {
   return { registros, erros, avisos };
 }
 
+/**
+ * VALORES_VENAIS pode vir com a coluna "placa" no lugar de "veiculo_id" (quem preenche
+ * conhece a placa). A placa é resolvida pela equivalência Mercosul.
+ */
+function resolverPlacas(matriz, veiculos, erros) {
+  const cab = matriz[0].map((h) => String(h || '').replace(/^\uFEFF/, '').trim());
+  const iPlaca = cab.indexOf('placa');
+  if (iPlaca < 0 || cab.includes('veiculo_id')) return matriz;
+  const porPlaca = new Map(veiculos.map((v) => [normalizarPlaca(v.placa), v.veiculo_id]));
+  const saida = [[...cab.slice(0, iPlaca), 'veiculo_id', ...cab.slice(iPlaca + 1)]];
+  matriz.slice(1).forEach((linha, i) => {
+    if (linha.every(vazio)) return;
+    const id = porPlaca.get(normalizarPlaca(linha[iPlaca]));
+    if (!id) erros.push(`VALORES_VENAIS linha ${i + 2}: placa ${linha[iPlaca]} não está cadastrada`);
+    saida.push([...linha.slice(0, iPlaca), id || '', ...linha.slice(iPlaca + 1)]);
+  });
+  return saida;
+}
+
 function rotulo(t, r) {
   const k = chaveRegistro(r, t);
   return `${t} linha ${r._linhaArquivo}${k ? ` (${k})` : ''}`;
@@ -61,10 +82,13 @@ function rotulo(t, r) {
  * @returns {{ok:boolean, porTabela:Object<string,{registros:object[], novos:number, atualizados:number}>,
  *            erros:string[], avisos:string[]}}
  */
-export function prepararImportacao(arquivos, existentes = {}) {
+export function prepararImportacao(arquivosEntrada, existentes = {}) {
+  let arquivos = arquivosEntrada;
   const erros = [], avisos = [], porTabela = {};
 
+  const veiculosParaPlaca = [...(existentes.VEICULOS || [])];
   for (const t of ORDEM_IMPORTACAO) {
+    if (t === 'VALORES_VENAIS' && arquivos[t]) arquivos = { ...arquivos, [t]: resolverPlacas(arquivos[t], veiculosParaPlaca.concat(porTabela.VEICULOS ? porTabela.VEICULOS.registros : []), erros) };
     const atuais = new Set((existentes[t] || []).map((r) => chaveRegistro(r, t)).filter(Boolean));
     if (!arquivos[t]) { porTabela[t] = { registros: [], novos: 0, atualizados: 0 }; continue; }
     const lido = matrizParaRegistros(t, arquivos[t]);
@@ -109,6 +133,9 @@ export function prepararImportacao(arquivos, existentes = {}) {
     const rot = `LOCACOES ${l.locacao_id}`;
     if (l.veiculo_id && !idsVeiculos.has(l.veiculo_id)) erros.push(`${rot}: veículo ${l.veiculo_id} não existe`);
     if (l.locatario_id && !idsLocatarios.has(l.locatario_id)) erros.push(`${rot}: locatário ${l.locatario_id} não existe`);
+  }
+  for (const vv of porTabela.VALORES_VENAIS.registros) {
+    if (vv.veiculo_id && !idsVeiculos.has(vv.veiculo_id)) erros.push(`VALORES_VENAIS ${vv.veiculo_id}: veículo não existe`);
   }
   if (porTabela.LOCACOES.registros.length) {
     try {

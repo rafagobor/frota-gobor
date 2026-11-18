@@ -1,8 +1,10 @@
 /**
  * Importação de CSVs da pasta "📤 Importação" (carga inicial da Fase 2).
  *
- * Arquivos esperados (os que existirem são importados): FILIAIS.csv, LOCATARIOS.csv,
- * VEICULOS.csv, LOCACOES.csv, gerados por scripts/carga_inicial/carga_previa.py.
+ * Arquivos aceitos (os que existirem são importados): FILIAIS.csv, LOCATARIOS.csv,
+ * VEICULOS.csv, LOCACOES.csv (carga inicial: scripts/carga_inicial/carga_previa.py) e
+ * CALENDARIO_VENCIMENTOS.csv, ALIQUOTAS_IPVA.csv, TAXAS_LICENCIAMENTO.csv (referencias/AAAA/)
+ * e VALORES_VENAIS.csv (com a coluna veiculo_id ou placa).
  *
  * Fluxo: lê e valida tudo (núcleo) → mostra o resumo → só grava se não houver erro e
  * você confirmar. Depois, os arquivos são renomeados com "[importado AAAA-MM-DD]".
@@ -41,7 +43,7 @@ var Importacao = (function () {
     Auth.exigir(['ADMIN']);
     var lidos = lerArquivos_();
     if (!Object.keys(lidos.matrizes).length) {
-      throw new Error('Nenhum CSV na pasta 📤 Importação. Esperado: FILIAIS.csv, LOCATARIOS.csv, VEICULOS.csv e/ou LOCACOES.csv.');
+      throw new Error('Nenhum CSV reconhecido na pasta 📤 Importação. Nomes aceitos: ' + Core.importacao.ORDEM_IMPORTACAO.map(function (t) { return t + '.csv'; }).join(', ') + '.');
     }
     var existentes = {};
     Core.importacao.ORDEM_IMPORTACAO.forEach(function (t) { existentes[t] = Db.lerTodos(t); });

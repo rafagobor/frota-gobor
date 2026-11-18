@@ -336,3 +336,34 @@ test('importação exige ADMIN', () => {
   assert.equal(amb.alertas.at(-1)[0], 'Erro na importação');
   assert.match(amb.alertas.at(-1)[1], /não permite/);
 });
+
+test('referências 2027 do repositório passam no importador e o exercício é gerado e regenerado sem duplicar', async () => {
+  const { readFileSync } = await import('node:fs');
+  const { amb, g } = comSetup();
+  const pasta = colocarCsvs(amb, g, { FILIAIS: CSV_FILIAIS, LOCATARIOS: CSV_LOCATARIOS, VEICULOS: CSV_VEICULOS, LOCACOES: CSV_LOCACOES });
+  for (const t of ['CALENDARIO_VENCIMENTOS', 'ALIQUOTAS_IPVA', 'TAXAS_LICENCIAMENTO']) {
+    pasta.createFile(`${t}.csv`, readFileSync(`referencias/2027/${t}.csv`, 'utf8'));
+  }
+  pasta.createFile('VALORES_VENAIS.csv', csv([['placa', 'exercicio', 'valor_venal', 'origem', 'fonte'], ['BEU1D91', '2027', '250000', 'MANUAL', 'teste']]));
+  g.menuImportarCsv();
+  assert.equal(amb.alertas.at(-1)[0], 'Importação concluída', JSON.stringify(amb.alertas.at(-1)).slice(0, 600));
+  assert.ok(g.Db.contar('CALENDARIO_VENCIMENTOS') > 100);
+  assert.equal(g.Db.porChave('VALORES_VENAIS')['V0001|2027'].valor_venal, 250000);
+
+  amb.estado.respostaPrompt = '2027';
+  g.menuGerarExercicio();
+  assert.equal(amb.alertas.at(-1)[0], 'Exercício 2027 gerado', JSON.stringify(amb.alertas.at(-1)).slice(0, 600));
+  const obr = g.Db.porChave('OBRIGACOES');
+  // BEU1D91 (cavalo PR, final 1): alíquota do cavalo PR ainda "a confirmar" → sem estimativa, mas com vencimento
+  assert.equal(obr['2027-IPVA-V0001-U'].vencimento, '2027-01-11');
+  assert.equal(obr['2027-IPVA-V0001-U'].valor_estimado, null);
+  assert.equal(obr['2027-LICENCIAMENTO-V0001-U'].valor_estimado, 94.61);
+  assert.equal(obr['2027-LICENCIAMENTO-V0001-U'].vencimento, '2027-08-16');
+  // NCK4696 (RO): sem calendário → obrigação criada sem vencimento
+  assert.equal(obr['2027-IPVA-V0002-U'].vencimento, null);
+  const n = g.Db.contar('OBRIGACOES');
+
+  g.menuGerarExercicio();
+  assert.equal(amb.alertas.at(-1)[0], 'Nada a mudar');
+  assert.equal(g.Db.contar('OBRIGACOES'), n, 'regenerar não duplica');
+});

@@ -182,8 +182,9 @@ export function criarAmbiente({ usuario = 'rafael@gobor.com.br', proprietario = 
   const ui = {
     createMenu: cadeiaMenu,
     alert: (...args) => { alertas.push(args); return args[2] === 'YES_NO' ? estado.respostaUi : 'OK'; },
+    prompt: (...args) => { alertas.push(['PROMPT', ...args]); return { getSelectedButton: () => 'OK', getResponseText: () => estado.respostaPrompt || '' }; },
     showModelessDialog: () => {},
-    ButtonSet: { OK: 'OK', YES_NO: 'YES_NO' },
+    ButtonSet: { OK: 'OK', YES_NO: 'YES_NO', OK_CANCEL: 'OK_CANCEL' },
     Button: { YES: 'YES', NO: 'NO', OK: 'OK' },
   };
 

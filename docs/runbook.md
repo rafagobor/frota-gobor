@@ -130,6 +130,13 @@ Os testes do script rodam com:
 python3 -m unittest discover -s scripts/carga_inicial
 ```
 
+## 8.2 Exercício (Fase 3)
+
+1. **Tabelas de referência.** Importe `referencias/2027/*.csv` pela pasta 📤 Importação: CALENDARIO_VENCIMENTOS, ALIQUOTAS_IPVA e TAXAS_LICENCIAMENTO. A situação de cada uma está em `referencias/2027/LEIA-ME.md`.
+2. **Valores venais** (opcional): `VALORES_VENAIS.csv` com as colunas `placa`, `exercicio`, `valor_venal`, `origem` (GUIA, CSV_SEFAZ, MANUAL ou PROJECAO) e `fonte`.
+3. **Gerar.** Use **🚛 Frota → Gerar exercício…** e informe o ano. O sistema mostra novas, atualizadas, canceladas, totais e pendências, e só grava depois da confirmação.
+4. **Gerar de novo** quando as tabelas mudarem: completa o que falta, atualiza vencimentos e estimativas não pagas e nunca altera obrigação paga ou lançada.
+
 ## 9. Usuários e perfis
 
 - Na aba **USUARIOS**, cada linha tem `email`, `perfil` (ADMIN, FINANCEIRO, DP ou CONSULTA) e `ativo` (S/N). A mudança vale em até 5 minutos (cache).
