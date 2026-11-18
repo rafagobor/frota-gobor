@@ -26,5 +26,11 @@ for (const arq of arquivos('apps-script')) {
     }
   }
 }
+try {
+  new vm.Script(readFileSync('dist/Frota.gs', 'utf8'), { filename: 'dist/Frota.gs' });
+} catch (e) {
+  erros++;
+  console.error('ERRO de sintaxe em dist/Frota.gs: ' + e.message);
+}
 if (erros) process.exit(1);
-console.log('OK: sintaxe do apps-script');
+console.log('OK: sintaxe do apps-script e de dist/Frota.gs');

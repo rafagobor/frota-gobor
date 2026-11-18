@@ -2,6 +2,10 @@
 
 Controle das obrigações documentais da frota (IPVA e licenciamento), dos custos que elas geram, das multas de trânsito e dos motoristas infratores. Tudo roda dentro do Google Workspace da Gobor: Google Sheets + Apps Script + Web App + Drive + API do Claude, sem servidor próprio e sem custo fixo.
 
+## Instalação
+
+Sem terminal: copie `dist/Frota.gs` (arquivo único, só ASCII) para o Apps Script da planilha. Passo a passo em [docs/runbook.md](docs/runbook.md#-instalação-sem-terminal-recomendada).
+
 ## Estrutura
 
 ```

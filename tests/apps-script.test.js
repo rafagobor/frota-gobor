@@ -4,7 +4,7 @@
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { criarAmbiente, carregarAppsScript } from './fakes/google.js';
+import { criarAmbiente, carregarAppsScript, carregarArquivoUnico } from './fakes/google.js';
 import { TABELAS, tabelasDaPlanilha, nomesColunas } from '../core/schema.js';
 import { CONFIG_PADRAO } from '../core/config-padrao.js';
 
@@ -366,4 +366,43 @@ test('referências 2027 do repositório passam no importador e o exercício é g
   g.menuGerarExercicio();
   assert.equal(amb.alertas.at(-1)[0], 'Nada a mudar');
   assert.equal(g.Db.contar('OBRIGACOES'), n, 'regenerar não duplica');
+});
+
+test('arquivo único dist/Frota.gs: menu, setup, painel, importação e geração', async () => {
+  const { readFileSync } = await import('node:fs');
+  const amb = criarAmbiente();
+  const g = carregarArquivoUnico(amb.globals);
+  g.onOpen();
+  assert.equal(amb.menus[0].nome, '🚛 Frota');
+  g.criarOuValidarBase();
+  assert.equal(amb.alertas.at(-1)[0], 'Base pronta', JSON.stringify(amb.alertas.at(-1)).slice(0, 400));
+  const html = g.doGet();
+  assert.equal(html.titulo, 'Frota Gobor');
+  assert.match(html.conteudo, /google\.script\.run/);
+  assert.doesNotMatch(html.conteudo, /incluir_/);
+  const pasta = colocarCsvs(amb, g, { FILIAIS: CSV_FILIAIS, LOCATARIOS: CSV_LOCATARIOS, VEICULOS: CSV_VEICULOS, LOCACOES: CSV_LOCACOES });
+  for (const t of ['CALENDARIO_VENCIMENTOS', 'ALIQUOTAS_IPVA', 'TAXAS_LICENCIAMENTO']) pasta.createFile(`${t}.csv`, readFileSync(`referencias/2027/${t}.csv`, 'utf8'));
+  g.menuImportarCsv();
+  assert.equal(amb.alertas.at(-1)[0], 'Importação concluída');
+  amb.estado.respostaPrompt = '2027';
+  g.menuGerarExercicio();
+  assert.equal(amb.alertas.at(-1)[0], 'Exercício 2027 gerado');
+  assert.ok(g.Db.contar('OBRIGACOES') > 0);
+});
+
+test('dist/Frota.gs é ASCII puro e sobrevive a copiar/colar (linhas em branco extras e recuo perdido)', async () => {
+  const { readFileSync } = await import('node:fs');
+  const vm = await import('node:vm');
+  const original = readFileSync('dist/Frota.gs', 'utf8');
+  assert.ok(!/[^\x00-\x7f]/.test(original), 'só ASCII');
+  const colado = original.split('\n').map((l) => l.replace(/^\s+/, '')).join('\n\n');
+  const amb = criarAmbiente();
+  const ctx = vm.createContext({ ...amb.globals });
+  vm.runInContext(colado, ctx, { filename: 'colado.gs' });
+  ctx.onOpen();
+  assert.equal(amb.menus[0].nome, '\u{1F69B} Frota', 'emoji do menu preservado');
+  ctx.criarOuValidarBase();
+  assert.equal(amb.alertas.at(-1)[0], 'Base pronta');
+  const raiz = amb.driveCompartilhado.filhos.find((f) => f.nome === '\u{1F69B} Frota Gobor \u2014 Documentos');
+  assert.ok(raiz.filhos.some((f) => f.nome === '\u{1F4E4} Importa\u00e7\u00e3o'));
 });

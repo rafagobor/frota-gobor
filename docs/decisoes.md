@@ -430,3 +430,15 @@ A validação no importador simulado também passou sem erros. CSVs em `dados/ca
 1. **Carretas e semirreboques pagam IPVA** em alguma UF da frota? (hoje: não)
 2. **Alíquota do cavalo no PR:** 1% ou 1,9%? Basta ver uma guia de IPVA 2026 de um cavalo do PR.
 3. **GO e RO:** valor da taxa de licenciamento (um boleto de 2026 serve) e calendário de RO (NCK4696).
+
+---
+
+## 14. Instalação sem terminal (18/11/2026)
+
+O usuário não usa terminal, então a instalação passou a ser só pelo navegador:
+
+| # | Decisão |
+|---|---|
+| D-29 | **Arquivo único `dist/Frota.gs`**, gerado no build e versionado: núcleo, servidor e painel (o HTML numa constante). É colado uma vez no Apps Script da planilha. Não precisa de `appsscript.json`: o Apps Script detecta os escopos, e o fuso é explícito no código |
+| D-30 | O arquivo é **100% ASCII**: o que não é ASCII vira `\\uXXXX`. Na primeira tentativa, a conversão para documento Google corrompeu os emojis. Há um teste que simula copiar e colar (recuo perdido, linhas em branco dobradas) |
+| D-31 | Com autorização do usuário ("preciso que fique mais fácil"), o Claude criou no Drive, pelo conector, a pasta "🚛 Frota Gobor — Documentos", com "📤 Importação" e os 7 CSVs (carga e referências 2027), e o documento "Frota.gs — copiar e colar no Apps Script". O setup reaproveita essas pastas pelo nome. O primeiro documento, com os emojis corrompidos, foi para a lixeira |

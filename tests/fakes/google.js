@@ -282,6 +282,11 @@ export function criarAmbiente({ usuario = 'rafael@gobor.com.br', proprietario = 
         };
         return t;
       },
+      createTemplate: (html) => {
+        const t = { html };
+        t.evaluate = () => ({ titulo: null, conteudo: html, setTitle(x) { this.titulo = x; return this; }, addMetaTag() { return this; }, setXFrameOptionsMode() { return this; } });
+        return t;
+      },
       createHtmlOutput: () => ({ setWidth() { return this; }, setHeight() { return this; } }),
       XFrameOptionsMode: { DEFAULT: 'DEFAULT' },
     },
@@ -298,5 +303,12 @@ export function carregarAppsScript(globals) {
   // Ordem invertida (exceto o núcleo) para provar que nada depende da ordem de carga.
   const ordem = ['00_core.js', ...arquivos.filter((n) => n !== '00_core.js').reverse()];
   for (const nome of ordem) vm.runInContext(readFileSync(join(dir, nome), 'utf8'), ctx, { filename: nome });
+  return ctx;
+}
+
+/** Carrega o arquivo único dist/Frota.gs (instalação sem terminal). */
+export function carregarArquivoUnico(globals) {
+  const ctx = vm.createContext({ ...globals });
+  vm.runInContext(readFileSync('dist/Frota.gs', 'utf8'), ctx, { filename: 'Frota.gs' });
   return ctx;
 }

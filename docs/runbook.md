@@ -1,6 +1,26 @@
 # Runbook: implantação e operação
 
-Passo a passo para colocar o sistema na conta Google da Gobor e mantê-lo atualizado. Os passos que exigem login são feitos por você; eu não tenho acesso à sua conta.
+Passo a passo para colocar o sistema na conta Google da Gobor e mantê-lo atualizado.
+
+---
+
+## ⭐ Instalação sem terminal (recomendada)
+
+Tudo pelo navegador. O sistema inteiro está num único arquivo, `dist/Frota.gs` (só caracteres ASCII), também disponível no Drive como o documento **"Frota.gs — copiar e colar no Apps Script"**, na pasta 🚛 Frota Gobor — Documentos.
+
+1. **Copiar o código.** Abra o documento "Frota.gs — copiar e colar no Apps Script" e faça Ctrl+A e Ctrl+C.
+2. **Colar na planilha.** Abra a planilha **🚛 Frota Gobor — Base** e vá em **Extensões → Apps Script**. No arquivo `Código.gs`, faça Ctrl+A e Ctrl+V. Salve (Ctrl+S).
+3. **Recarregar a planilha.** Volte para a planilha e recarregue a página (F5). Em alguns segundos aparece o menu **🚛 Frota**.
+4. **Criar a base.** Clique em **🚛 Frota → Admin → Criar/validar base**.
+   - O Google pede autorização: Continuar → escolha sua conta → **Permitir**.
+   - Se aparecer "o Google não verificou este app", clique em Avançado → Acessar (o app é seu, interno).
+   - Depois de autorizar, clique de novo em Criar/validar base. A mensagem esperada é **"Base pronta"**.
+5. **Importar.** Clique em **🚛 Frota → Admin → Importar CSVs da pasta 📤 Importação…**. Confira o resumo (212 veículos, 34 locatários, 85 locações, 9 filiais e as tabelas de 2027) e clique em **Sim**.
+6. **Gerar o exercício.** Clique em **🚛 Frota → Gerar exercício…**, aperte Enter para 2027, confira e clique em **Sim**.
+
+**Para atualizar para uma versão nova:** repita os passos 1 a 3 com o documento novo. Os dados da planilha não são afetados. Em seguida, rode Criar/validar base de novo.
+
+O caminho com terminal (`clasp`), abaixo, fica para quem desenvolve.
 
 ---
 
